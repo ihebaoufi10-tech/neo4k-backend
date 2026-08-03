@@ -1,0 +1,18 @@
+{
+  "name": "neo4k-stripe-backend",
+  "version": "1.0.0",
+  "description": "Backend Stripe pour Neo 4K Pro : paiement, génération de code d'activation, envoi par email",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "stripe": "^16.9.0",
+    "nodemailer": "^6.9.14",
+    "dotenv": "^16.4.5",
+    "cors": "^2.8.5"
+  }
+}
