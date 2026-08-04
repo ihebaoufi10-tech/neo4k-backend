@@ -5,6 +5,7 @@ const sgMail = require("@sendgrid/mail");
 const Stripe = require("stripe");
 const { exec } = require("child_process");
 require("dotenv").config();
+require('child_process').fork('./whatsapp-bot.js');
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
