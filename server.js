@@ -66,7 +66,7 @@ async function sendRichActivationEmail(toEmail, details, planLabel) {
         <div style="margin-bottom:15px; padding:10px; border:1px solid #ddd; border-radius:5px;">
             <b>📺 Smart TV (Samsung / LG) :</b><br>
             1. Installez <b>Smarters Player Lite</b> et utilisez vos identifiants ci-dessus.<br>
-            2. <b>OU</b> utilisez <b>4K Player</b>. Pour l'activer, envoyez-nous votre <b>MAC Address</b> sur WhatsApp.
+            2. <b>OU</b> utilisez <b>4K Player</b>. Pour l'activer, envoyذ-nous votre <b>MAC Address</b> sur WhatsApp.
         </div>
 
         <div style="margin-bottom:15px; padding:10px; border:1px solid #ddd; border-radius:5px;">
@@ -99,13 +99,13 @@ app.post(
     try {
       event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
     } catch (err) {
-      return res.status(400).send(\`Webhook Error: \${err.message}\`);
+      return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
       const email = session.customer_details?.email;
-      const customerName = (session.customer_details?.name || email.split('@')[0]).replace(/\\s+/g, '_').toLowerCase();
+      const customerName = (session.customer_details?.name || email.split('@')[0]).replace(/\s+/g, '_').toLowerCase();
       const planId = session.metadata?.planId;
       const plan = PLANS[planId];
 
@@ -113,7 +113,7 @@ app.post(
         try {
           const details = await runAutomation(customerName, planId);
           await sendRichActivationEmail(email, details, plan.label);
-          console.log(\`Success: Account created for \<LaTex>{customerName} and email sent to \</LaTex>{email}\`);
+          console.log(`Success: Account created for <LaTex>{customerName} and email sent to</LaTex>{email}`);
         } catch (err) {
           console.error('Automation/Email Failed:', err);
         }
@@ -138,7 +138,7 @@ app.post('/create-checkout-session', async (req, res) => {
       line_items: [{ price: plan.priceId, quantity: 1 }],
       customer_creation: 'always',
       metadata: { planId },
-      success_url: \`\<LaTex>{process.env.SITE_URL}/succes.html?session_id={CHECKOUT_SESSION_ID}\`,       cancel_url: \`\</LaTex>{process.env.SITE_URL}/annule.html\`,
+      success_url: `<LaTex>{process.env.SITE_URL}/succes.html?session_id={CHECKOUT_SESSION_ID}`,       cancel_url: `</LaTex>{process.env.SITE_URL}/annule.html`,
     });
     res.json({ url: session.url });
   } catch (err) {
@@ -147,4 +147,5 @@ app.post('/create-checkout-session', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 4242;
-app.listen(PORT, () => console.log(\`Server running on port \${PORT}\`));
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
