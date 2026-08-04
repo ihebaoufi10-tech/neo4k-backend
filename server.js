@@ -1,26 +1,16 @@
-// ============================================================
-// NEO 4K PRO — Backend Stripe
-// Paiement -> génération d'un code d'activation -> envoi email
-// ============================================================
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const sgMail = require('@sendgrid/mail');
 const Stripe = require('stripe');
+const { exec } = require('child_process');
 
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 const app = express();
 
-// ------------------------------------------------------------
-// Config des offres : associe un identifiant de plan interne
-// au Price ID Stripe correspondant (créé dans le Dashboard Stripe
-// > Produits > votre produit > Prix). Et à sa durée en jours,
-// utilisée pour la date d'expiration du code.
-// ------------------------------------------------------------
 const PLANS = {
   '1mois':  { priceId: process.env.STRIPE_PRICE_1MOIS,  label: '1 mois',  durationDays: 30 },
   '3mois':  { priceId: process.env.STRIPE_PRICE_3MOIS,  label: '3 mois',  durationDays: 91 },
@@ -28,61 +18,77 @@ const PLANS = {
   '12mois': { priceId: process.env.STRIPE_PRICE_12MOIS, label: '12 mois', durationDays: 365 },
 };
 
-const CODES_FILE = path.join(__dirname, 'codes.json');
-if (!fs.existsSync(CODES_FILE)) fs.writeFileSync(CODES_FILE, '[]');
-
-function readCodes() {
-  return JSON.parse(fs.readFileSync(CODES_FILE, 'utf-8'));
-}
-function saveCode(entry) {
-  const codes = readCodes();
-  codes.push(entry);
-  fs.writeFileSync(CODES_FILE, JSON.stringify(codes, null, 2));
-}
-
-// Génère un code lisible du type NEO4K-8F2A-91DC-77KM
-function generateActivationCode() {
-  const block = () => crypto.randomBytes(2).toString('hex').toUpperCase();
-  return `NEO4K-${block()}-${block()}-${block()}`;
+async function runAutomation(customerName, planId) {
+  return new Promise((resolve, reject) => {
+    const scriptPath = path.join(__dirname, 'automation.js');
+    exec(`node "<LaTex>{scriptPath}" "</LaTex>{customerName}" "<LaTex>{planId}"`, (error, stdout, stderr) => {       if (error) {         console.error(`Automation Error:</LaTex>{stderr}`);
+        return reject(stderr);
+      }
+      const match = stdout.match(/RESULT:(.+)/);
+      if (match) {
+        resolve(JSON.parse(match[1]));
+      } else {
+        reject('No result found in automation output');
+      }
+    });
+  });
 }
 
-// ------------------------------------------------------------
-// Envoi d'email via l'API HTTPS de SendGrid (port 443).
-// IMPORTANT : Render bloque les ports SMTP (25/465/587) sur son
-// offre gratuite depuis septembre 2025. L'API HTTPS de SendGrid
-// contourne ce blocage puisqu'elle passe par le port 443, comme
-// n'importe quelle requête web classique.
-// ------------------------------------------------------------
-async function sendActivationEmail(toEmail, code, planLabel, expiresAt) {
-  const expiresStr = new Date(expiresAt).toLocaleDateString('fr-FR');
+async function sendRichActivationEmail(toEmail, details, planLabel) {
+  const whatsappNumber = "213564653328";
+  const whatsappLink = `https://wa.me/${whatsappNumber}?text=Bonjour, voici mon MAC Address pour l'activation 4K Player : `;
+
   await sgMail.send({
     to: toEmail,
     from: process.env.FROM_EMAIL,
-    subject: 'Votre code d\'activation Neo 4K Pro',
+    subject: 'Vos accès Neo 4K Pro 🎬',
     html: `
-      <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;">
-        <h2 style="color:#111;">Merci pour votre abonnement 🎬</h2>
-        <p>Votre formule : <b>${planLabel}</b></p>
-        <p>Voici votre code d'activation :</p>
-        <p style="font-size:22px;font-weight:bold;background:#f4f4f4;padding:14px;border-radius:8px;text-align:center;letter-spacing:1px;">
-          ${code}
-        </p>
-        <p>Valable jusqu'au <b>${expiresStr}</b>.</p>
-        <p>Entrez ce code dans l'application Neo 4K Pro, dans le menu « Activer un code ».</p>
-        <p style="color:#888;font-size:12px;margin-top:24px;">
-          Besoin d'aide ? Répondez simplement à cet email.
+      <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;border:1px solid #eee;padding:20px;border-radius:10px;direction:ltr;text-align:left;">
+        <div style="text-align:center;">
+            <h2 style="color:#e67e22;">Merci pour votre confiance ! 🎬</h2>
+            <p>Votre abonnement <b>${planLabel}</b> est maintenant actif.</p>
+        </div>
+        
+        <div style="background:#f9f9f9;padding:15px;border-radius:8px;margin:20px 0;border-left:5px solid #e67e22;">
+          <h3 style="margin-top:0;">🔑 Vos identifiants :</h3>
+          <p><b>Nom d'utilisateur :</b> <code style="background:#eee;padding:2px 5px;"><LaTex>{details.username}</code></p>           <p><b>Mot de passe :</b> <code style="background:#eee;padding:2px 5px;"></LaTex>{details.password}</code></p>
+          <p><b>Serveur / Host :</b> <code><LaTex>{details.domain}</code></p>           <p><b>Lien M3U :</b> <br><small style="word-break:break-all;color:#777;"></LaTex>{details.m3u}</small></p>
+        </div>
+
+        <h3>📲 Installation par appareil :</h3>
+        
+        <div style="margin-bottom:15px; padding:10px; border:1px solid #ddd; border-radius:5px;">
+            <b>🤖 Android (Box, TV, Mobile) :</b><br>
+            Utilisez Downloader avec le code : <b style="color:#e67e22;">1842729</b> (Neo4K Pro)<br>
+            Lien direct : <a href="http://aftv.news/1842729">http://aftv.news/1842729</a>
+        </div>
+
+        <div style="margin-bottom:15px; padding:10px; border:1px solid #ddd; border-radius:5px;">
+            <b>📺 Smart TV (Samsung / LG) :</b><br>
+            1. Installez <b>Smarters Player Lite</b> et utilisez vos identifiants ci-dessus.<br>
+            2. <b>OU</b> utilisez <b>4K Player</b>. Pour l'activer, envoyez-nous votre <b>MAC Address</b> sur WhatsApp.
+        </div>
+
+        <div style="margin-bottom:15px; padding:10px; border:1px solid #ddd; border-radius:5px;">
+            <b>🍎 Apple (iPhone, iPad, Apple TV) :</b><br>
+            Installez <b>IPTV Smarters Player</b> depuis l'App Store.
+        </div>
+
+        <div style="text-align:center; margin-top:30px;">
+            <a href="${whatsappLink}" style="background:#25D366; color:white; padding:12px 25px; text-decoration:none; border-radius:50px; font-weight:bold; display:inline-block;">
+                💬 Contact Support (WhatsApp)
+            </a>
+            <p style="font-size:12px; color:#777; margin-top:10px;">Cliquez ici pour nous envoyer votre MAC Address ou pour toute assistance.</p>
+        </div>
+
+        <p style="margin-top:30px;font-size:14px;color:#777;text-align:center;">
+          Profitez bien de votre abonnement ! 🍿
         </p>
       </div>
     `,
   });
 }
 
-// ------------------------------------------------------------
-// IMPORTANT : la route webhook doit lire le corps BRUT (raw)
-// pour que Stripe puisse vérifier la signature. Elle doit donc
-// être déclarée AVANT express.json() global, avec son propre
-// middleware express.raw().
-// ------------------------------------------------------------
 app.post(
   '/webhook',
   express.raw({ type: 'application/json' }),
@@ -91,71 +97,40 @@ app.post(
     let event;
 
     try {
-      event = stripe.webhooks.constructEvent(
-        req.body,
-        sig,
-        process.env.STRIPE_WEBHOOK_SECRET
-      );
+      event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
     } catch (err) {
-      console.error('Signature webhook invalide :', err.message);
-      return res.status(400).send(`Webhook Error: ${err.message}`);
+      return res.status(400).send(\`Webhook Error: \${err.message}\`);
     }
 
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
       const email = session.customer_details?.email;
+      const customerName = (session.customer_details?.name || email.split('@')[0]).replace(/\\s+/g, '_').toLowerCase();
       const planId = session.metadata?.planId;
       const plan = PLANS[planId];
 
-      if (!email || !plan) {
-        console.error('Session sans email ou plan reconnu :', session.id);
-        return res.status(200).send('ok'); // on répond quand même 200 à Stripe
-      }
-
-      try {
-        const code = generateActivationCode();
-        const createdAt = Date.now();
-        const expiresAt = createdAt + plan.durationDays * 24 * 60 * 60 * 1000;
-
-        saveCode({
-          code,
-          email,
-          planId,
-          planLabel: plan.label,
-          sessionId: session.id,
-          createdAt,
-          expiresAt,
-        });
-
-        await sendActivationEmail(email, code, plan.label, expiresAt);
-        console.log(`Code envoyé à ${email} : ${code}`);
-      } catch (err) {
-        console.error('Erreur génération/envoi du code :', err?.response?.body || err);
-        // Le paiement reste valide côté Stripe ; à traiter manuellement si besoin.
+      if (email && plan) {
+        try {
+          const details = await runAutomation(customerName, planId);
+          await sendRichActivationEmail(email, details, plan.label);
+          console.log(\`Success: Account created for \<LaTex>{customerName} and email sent to \</LaTex>{email}\`);
+        } catch (err) {
+          console.error('Automation/Email Failed:', err);
+        }
       }
     }
-
     res.status(200).send('ok');
   }
 );
 
-// Le reste des routes utilise express.json() normalement
 app.use(cors());
 app.use(express.json());
 
-// ------------------------------------------------------------
-// Crée une session de paiement Stripe pour un plan donné et
-// renvoie l'URL vers laquelle rediriger le client.
-// Appelée depuis les boutons de la page de tarifs.
-// ------------------------------------------------------------
 app.post('/create-checkout-session', async (req, res) => {
   try {
     const { planId } = req.body;
     const plan = PLANS[planId];
-
-    if (!plan || !plan.priceId) {
-      return res.status(400).json({ error: 'Plan invalide ou non configuré.' });
-    }
+    if (!plan) return res.status(400).json({ error: 'Plan invalide' });
 
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
@@ -163,21 +138,13 @@ app.post('/create-checkout-session', async (req, res) => {
       line_items: [{ price: plan.priceId, quantity: 1 }],
       customer_creation: 'always',
       metadata: { planId },
-      success_url: `${process.env.SITE_URL}/succes.html?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.SITE_URL}/annule.html`,
+      success_url: \`\<LaTex>{process.env.SITE_URL}/succes.html?session_id={CHECKOUT_SESSION_ID}\`,       cancel_url: \`\</LaTex>{process.env.SITE_URL}/annule.html\`,
     });
-
     res.json({ url: session.url });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Erreur lors de la création du paiement.' });
+    res.status(500).json({ error: 'Erreur Stripe' });
   }
 });
 
-// Petite route de santé, utile pour vérifier que le serveur tourne
-app.get('/health', (req, res) => res.json({ ok: true }));
-
 const PORT = process.env.PORT || 4242;
-app.listen(PORT, () => {
-  console.log(`Serveur Neo 4K Pro backend lancé sur le port ${PORT}`);
-});
+app.listen(PORT, () => console.log(\`Server running on port \${PORT}\`));
