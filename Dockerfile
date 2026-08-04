@@ -1,9 +1,10 @@
 FROM node:18
 
-# تثبيت المكتبات اللازمة لتشغيل متصفح كروم (Puppeteer)
+# تنظيف أي إعدادات قديمة قد تسبب فشل التحديث
+RUN rm -f /etc/apt/sources.list.d/google*.list
+
+# تثبيت المكتبات الأساسية لتشغيل Puppeteer بدون مشاكل
 RUN apt-get update && apt-get install -y \
-    wget \
-    gnupg \
     ca-certificates \
     fonts-liberation \
     libasound2 \
@@ -38,23 +39,21 @@ RUN apt-get update && apt-get install -y \
     libxss1 \
     libxtst6 \
     lsb-release \
+    wget \
     xdg-utils \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
-# إنشاء مجلد العمل
 WORKDIR /usr/src/app
 
-# تثبيت المكتبات الخاصة بالمشروع
 COPY package*.json ./
 RUN npm install
 
-# نسخ ملفات المشروع
 COPY . .
 
-# المنفذ الخاص بـ Render
 EXPOSE 10000
 
-# تشغيل السيرفر
+# ملاحظة: تأكد أن ملف التشغيل في GitHub اسمه server.js
 CMD [ "node", "server.js" ]
+
 
