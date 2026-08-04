@@ -8,10 +8,11 @@ const cors = require('cors');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const nodemailer = require('nodemailer');
+const sgMail = require('@sendgrid/mail');
 const Stripe = require('stripe');
 
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 const app = express();
 
 // ------------------------------------------------------------
@@ -45,22 +46,18 @@ function generateActivationCode() {
   return `NEO4K-${block()}-${block()}-${block()}`;
 }
 
-// Envoi d'email via SMTP (Gmail, SendGrid, Brevo/Sendinblue, OVH, etc. — au choix)
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT || 587),
-  secure: Number(process.env.SMTP_PORT) === 465,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
-
+// ------------------------------------------------------------
+// Envoi d'email via l'API HTTPS de SendGrid (port 443).
+// IMPORTANT : Render bloque les ports SMTP (25/465/587) sur son
+// offre gratuite depuis septembre 2025. L'API HTTPS de SendGrid
+// contourne ce blocage puisqu'elle passe par le port 443, comme
+// n'importe quelle requête web classique.
+// ------------------------------------------------------------
 async function sendActivationEmail(toEmail, code, planLabel, expiresAt) {
   const expiresStr = new Date(expiresAt).toLocaleDateString('fr-FR');
-  await transporter.sendMail({
-    from: process.env.FROM_EMAIL,
+  await sgMail.send({
     to: toEmail,
+    from: process.env.FROM_EMAIL,
     subject: 'Votre code d\'activation Neo 4K Pro',
     html: `
       <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;">
@@ -133,7 +130,7 @@ app.post(
         await sendActivationEmail(email, code, plan.label, expiresAt);
         console.log(`Code envoyé à ${email} : ${code}`);
       } catch (err) {
-        console.error('Erreur génération/envoi du code :', err);
+        console.error('Erreur génération/envoi du code :', err?.response?.body || err);
         // Le paiement reste valide côté Stripe ; à traiter manuellement si besoin.
       }
     }
