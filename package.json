@@ -1,18 +1,24 @@
 {
-  "name": "neo4k-backend",
+  "name": "neo4k-bot-system",
   "version": "1.0.0",
-  "description": "Backend for Neo 4K Pro with automation",
+  "description": "IPTV Automation and WhatsApp Bot System",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "bot": "node whatsapp-bot.js"
   },
   "dependencies": {
-    "@sendgrid/mail": "^7.7.0",
-    "cors": "^2.8.5",
-    "dotenv": "^16.0.3",
     "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "stripe": "^11.0.0",
+    "@sendgrid/mail": "^7.7.0",
     "puppeteer": "^21.0.0",
-    "stripe": "^11.16.0"
+    "whatsapp-web.js": "latest",
+    "qrcode-terminal": "^0.12.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
   }
 }
+
 
