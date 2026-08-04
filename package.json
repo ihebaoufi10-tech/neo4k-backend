@@ -4,7 +4,7 @@
   "description": "IPTV Automation and WhatsApp Bot System",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "node server.js & node whatsapp-bot.js",
     "bot": "node whatsapp-bot.js"
   },
   "dependencies": {
@@ -20,5 +20,6 @@
     "node": ">=16.0.0"
   }
 }
+
 
 
