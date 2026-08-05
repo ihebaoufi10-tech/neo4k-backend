@@ -17,18 +17,15 @@ async function connectToWhatsApp() {
         auth: state,
         printQRInTerminal: false,
         logger: pino({ level: 'silent' }),
-        // Identity as Windows Chrome
         browser: ['Windows', 'Chrome', '110.0.0.0']
     });
 
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect } = update;
-        
         if (connection === 'open') {
             global.waStatus = "Connecté ✅";
             global.waPairingCode = null;
         }
-
         if (connection === 'close') {
             global.waStatus = "Déconnecté ❌";
             const shouldReconnect = (lastDisconnect.error)?.output?.statusCode !== DisconnectReason.loggedOut;
@@ -42,6 +39,7 @@ async function connectToWhatsApp() {
                 let code = await sock.requestPairingCode("213564653328");
                 global.waPairingCode = code;
                 global.waStatus = "En attente de couplage... 🔑";
+                console.log("PAIRING CODE:", code);
             } catch (e) {
                 console.error("Pairing Error:", e);
                 global.waStatus = "Erreur de code ❌";
@@ -60,5 +58,4 @@ async function connectToWhatsApp() {
     };
 }
 
-connectToWhatsApp();
 module.exports = { connectToWhatsApp };
