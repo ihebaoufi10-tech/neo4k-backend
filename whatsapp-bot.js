@@ -4,6 +4,9 @@ const { exec } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 
+// متغير لمنع تكرار الطلب
+let pairingCodeRequested = false;
+
 const client = new Client({
   authStrategy: new LocalAuth(),
   puppeteer: {
@@ -21,15 +24,17 @@ const client = new Client({
 });
 
 client.on("qr", async (qr) => {
-  console.log("Scan this QR code (ASCII):");
+  console.log("QR Code received. Generating ASCII...");
   qrcode.generate(qr, { small: true });
 
-  // إضافة تأخير بسيط (5 ثوانٍ) قبل طلب رمز الربط لضمان استقرار الاتصال
   const phoneNumber = process.env.PHONE_NUMBER;
-  if (phoneNumber) {
-    console.log(`Waiting 5 seconds before requesting pairing code for: ${phoneNumber}...`);
+  if (phoneNumber && !pairingCodeRequested) {
+    pairingCodeRequested = true;
+    console.log(`Waiting 10 seconds before requesting pairing code for: ${phoneNumber}...`);
+    
     setTimeout(async () => {
       try {
+        console.log("Sending request for pairing code now...");
         const pairingCode = await client.requestPairingCode(phoneNumber);
         console.log("==========================================");
         console.log("YOUR WHATSAPP PAIRING CODE:");
@@ -37,21 +42,20 @@ client.on("qr", async (qr) => {
         console.log("==========================================");
       } catch (err) {
         console.error("Error requesting pairing code:", err);
+        pairingCodeRequested = false; // السماح بالمحاولة مرة أخرى في حال الفشل
       }
-    }, 5000);
+    }, 10000); // زيادة الوقت لـ 10 ثوانٍ
   }
 });
 
-client.on("ready", () => console.log("WhatsApp Bot is ready!"));
-client.on("authenticated", () => console.log("Authenticated successfully!"));
-
-const userState = {};
-
-client.on("message", async (msg) => {
-  const contact = await msg.getContact();
-  const text = msg.body.toLowerCase();
-  // ... بقية الكود الخاص بك (لا تقم بتغيير ما بعد هذا السطر)
+client.on("ready", () => {
+  console.log("WhatsApp Bot is ready!");
+  pairingCodeRequested = false;
 });
 
+client.on("authenticated", () => console.log("Authenticated successfully!"));
+
 client.initialize();
+
+// بقية الكود الخاص بمعالجة الرسائل (client.on("message", ...)) يبقى كما هو تحت هذا السطر
 
