@@ -1,7 +1,6 @@
 {
   "name": "neo4k-backend",
   "version": "1.0.0",
-  "description": "IPTV Automation System",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
