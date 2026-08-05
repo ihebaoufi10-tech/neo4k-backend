@@ -3,7 +3,6 @@ const pino = require("pino");
 const qrcode = require("qrcode-terminal");
 
 async function connectToWhatsApp() {
-    // حفظ الجلسة في مجلد لكي لا يطلب الكود كل مرة
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     const { version } = await fetchLatestBaileysVersion();
 
@@ -21,28 +20,28 @@ async function connectToWhatsApp() {
         const { connection, lastDisconnect, qr } = update;
         
         if (qr) {
-            console.log("==========================================");
-            console.log("SCAN THIS QR OR USE PAIRING CODE:");
+            console.log("=== SCAN QR OR WAIT FOR CODE ===");
             qrcode.generate(qr, { small: true });
-            console.log("==========================================");
             
             const phoneNumber = process.env.PHONE_NUMBER;
             if (phoneNumber) {
                 try {
-                    await delay(5000);
+                    // انتظار 10 ثواني لضمان استقرار الاتصال
+                    await delay(10000);
+                    console.log("Requesting Pairing Code for:", phoneNumber);
                     const code = await sock.requestPairingCode(phoneNumber.replace('+', ''));
                     console.log("*********************************");
-                    console.log("NEW WHATSAPP CODE IS:", code);
+                    console.log("YOUR NEW WHATSAPP CODE IS:", code);
                     console.log("*********************************");
                 } catch (e) {
-                    console.log("Waiting for WhatsApp to allow new code...");
+                    console.log("WhatsApp busy, will retry in 30s...");
                 }
             }
         }
 
         if (connection === 'close') {
             console.log("Connection closed, reconnecting...");
-            connectToWhatsApp();
+            setTimeout(() => connectToWhatsApp(), 5000);
         } else if (connection === 'open') {
             console.log("SUCCESS: WHATSAPP CONNECTED!");
         }
@@ -50,6 +49,7 @@ async function connectToWhatsApp() {
 }
 
 connectToWhatsApp();
+
 
 
 
