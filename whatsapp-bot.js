@@ -1,11 +1,15 @@
+// 1. تعريف التشفير بشكل عالمي في أول سطر
+const crypto = require('crypto');
+global.crypto = crypto; 
+
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay, fetchLatestBaileysVersion } = require("@whiskeysockets/baileys");
 const pino = require("pino");
 const qrcode = require("qrcode-terminal");
 const { Boom } = require("@hapi/boom");
 
 async function connectToWhatsApp() {
-    // قمنا بتغيير الاسم هنا لضمان مسح أي أخطاء قديمة
-    const { state, saveCreds } = await useMultiFileAuthState('session_new');
+    // استخدام اسم مجلد جديد تماماً لمسح أي ملفات تالفة
+    const { state, saveCreds } = await useMultiFileAuthState('session_baileys_final');
     const { version } = await fetchLatestBaileysVersion();
 
     console.log("Starting WhatsApp Connection (Baileys v" + version.join('.') + ")...");
@@ -33,14 +37,14 @@ async function connectToWhatsApp() {
             const phoneNumber = process.env.PHONE_NUMBER;
             if (phoneNumber) {
                 try {
-                    await delay(15000);
+                    await delay(20000); // زيادة وقت الانتظار لـ 20 ثانية
                     console.log("Requesting Pairing Code for:", phoneNumber);
                     const code = await sock.requestPairingCode(phoneNumber.replace('+', ''));
                     console.log("*********************************");
                     console.log("YOUR WHATSAPP CODE IS:", code);
                     console.log("*********************************");
                 } catch (e) {
-                    console.log("WhatsApp busy, please wait or scan QR.");
+                    console.log("WhatsApp busy or rate-limited. Retrying later...");
                 }
             }
         }
@@ -51,10 +55,9 @@ async function connectToWhatsApp() {
             
             console.log('Connection closed. Status:', statusCode, 'Error:', error?.message);
             
-            // إعادة المحاولة فقط إذا لم يكن خروجاً متعاداً، ومع انتظار 10 ثوانٍ
             if (statusCode !== DisconnectReason.loggedOut) {
-                console.log("Reconnecting in 10 seconds...");
-                setTimeout(() => connectToWhatsApp(), 10000);
+                console.log("Reconnecting in 15 seconds...");
+                setTimeout(() => connectToWhatsApp(), 15000);
             }
         } else if (connection === 'open') {
             console.log("SUCCESS: WHATSAPP CONNECTED!");
@@ -62,7 +65,9 @@ async function connectToWhatsApp() {
     });
 }
 
+// تشغيل البوت
 connectToWhatsApp().catch(err => console.log("Critical Error:", err));
+
 
 
 
