@@ -3,10 +3,10 @@ const pino = require("pino");
 const fs = require('fs');
 
 global.waStatus = "Initialisation...";
-global.waQR = null;
+global.waPairingCode = null;
 
 async function connectToWhatsApp() {
-    // Cleanup to force new session if not connected
+    // Cleanup to force new code
     if (fs.existsSync('./session_final') && global.waStatus !== "Connecté ✅") {
         try { fs.rmSync('./session_final', { recursive: true, force: true }); } catch (e) {}
     }
@@ -17,20 +17,16 @@ async function connectToWhatsApp() {
         auth: state,
         printQRInTerminal: false,
         logger: pino({ level: 'silent' }),
+        // Identity as Windows Chrome
         browser: ['Windows', 'Chrome', '110.0.0.0']
     });
 
     sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect, qr } = update;
+        const { connection, lastDisconnect } = update;
         
-        if (qr) {
-            global.waQR = qr;
-            global.waStatus = "En attente de scan QR... 📷";
-        }
-
         if (connection === 'open') {
             global.waStatus = "Connecté ✅";
-            global.waQR = null;
+            global.waPairingCode = null;
         }
 
         if (connection === 'close') {
@@ -39,6 +35,19 @@ async function connectToWhatsApp() {
             if (shouldReconnect) connectToWhatsApp();
         }
     });
+
+    if (!sock.authState.creds.registered) {
+        setTimeout(async () => {
+            try {
+                let code = await sock.requestPairingCode("213564653328");
+                global.waPairingCode = code;
+                global.waStatus = "En attente de couplage... 🔑";
+            } catch (e) {
+                console.error("Pairing Error:", e);
+                global.waStatus = "Erreur de code ❌";
+            }
+        }, 5000);
+    }
 
     sock.ev.on('creds.update', saveCreds);
 
