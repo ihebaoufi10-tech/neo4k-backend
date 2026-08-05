@@ -6,6 +6,14 @@ global.waStatus = "Initialisation...";
 global.waPairingCode = null;
 
 async function connectToWhatsApp() {
+    // Force cleanup of old session to ensure a fresh code
+    if (fs.existsSync('./session_final')) {
+        try {
+            fs.rmSync('./session_final', { recursive: true, force: true });
+            console.log("Session cleared for fresh start.");
+        } catch (e) { console.error("Cleanup error:", e); }
+    }
+
     const { state, saveCreds } = await useMultiFileAuthState('./session_final');
     
     const sock = makeWASocket({
@@ -35,9 +43,10 @@ async function connectToWhatsApp() {
                 let code = await sock.requestPairingCode("213564653328");
                 global.waPairingCode = code;
                 global.waStatus = "En attente de couplage... 🔑";
-                console.log("CODE WHATSAPP:", code);
+                console.log("NOUVEAU CODE WHATSAPP:", code);
             } catch (e) {
                 console.error("Error requesting pairing code:", e);
+                global.waStatus = "Erreur de code ❌";
             }
         }, 5000);
     }
