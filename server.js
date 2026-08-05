@@ -1,56 +1,65 @@
 const express = require("express");
 const cors = require("cors");
-const Stripe = require("stripe");
 const { exec } = require("child_process");
+const Stripe = require("stripe");
 require("dotenv").config();
 
+const app = express();
+
+// 1. تفعيل الاتصال بين الموقع والسيرفر (CORS) - مهم جداً
+app.use(cors()); 
+app.use(express.json());
+
+// تشغيل بوت الواتساب في الخلفية
 require('child_process').fork('./whatsapp-bot.js');
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-const app = express();
-const ADMIN_WA = "213564653328@s.whatsapp.net";
+const ADMIN_NUMBER = "213564653328@s.whatsapp.net";
 
-app.post("/webhook", express.raw({ type: "application/json" }), async (req, res) => {
-  const sig = req.headers["stripe-signature"];
-  let event;
-  try { event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET); } catch (err) { return res.status(400).send(err.message); }
+const PLANS = {
+  "1mois": { priceId: process.env.STRIPE_PRICE_1MOIS, label: "1 mois" },
+  "3mois": { priceId: process.env.STRIPE_PRICE_3MOIS, label: "3 mois" },
+  "6mois": { priceId: process.env.STRIPE_PRICE_6MOIS, label: "6 mois" },
+  "12mois": { priceId: process.env.STRIPE_PRICE_12MOIS, label: "12 mois" }
+};
 
-  if (event.type === 'checkout.session.completed') {
-    const session = event.data.object;
-    const email = session.customer_details.email;
-    if (global.sendWA) await global.sendWA(ADMIN_WA, `💰 VENTE !\nClient: <LaTex>{email}\n👉 Activez: https://4k.cms-only.ru/addnew?t=lines`);          exec(`node automation.js "</LaTex>{email.split('@')[0]}" "<LaTex>{session.metadata.planId}" "add" "</LaTex>{email}"`, async (error, stdout) => {
-        const match = stdout.match(/RESULT:(.+)/);
-        if (match) {
-            const d = JSON.parse(match[1]);
-            const msg = `✅ ACTIF !\nUser: <LaTex>{d.username}\nPass:</LaTex>{d.password}`;
-            if (global.sendWA) await global.sendWA(ADMIN_WA, msg);
-        } else {
-            if (global.sendWA) await global.sendWA(ADMIN_WA, "⚠️ CAPTCHA ! Activez manuellement pour: " + email);
-        }
-    });
-  }
-  res.status(200).send("ok");
+// صفحة للتأكد من أن السيرفر يعمل
+app.get("/", (req, res) => {
+  res.send("<h1>Server is Live and Running! 🚀</h1>");
 });
 
-app.post("/request-trial", express.json(), async (req, res) => {
-    if (global.sendWA) await global.sendWA(ADMIN_WA, `🎁 TEST 24H\nEmail: ${req.body.email}\n👉 Activez: https://4k.cms-only.ru/addnew?t=lines`);
-    res.json({ success: true });
+// استقبال طلبات التجربة المجانية
+app.post("/request-trial", async (req, res) => {
+    const { email, name } = req.body;
+    console.log("Demande d'essai reçue:", email);
+    
+    if (global.sendWA) {
+        const msg = `🎁 DEMANDE D'ESSAI (24H)\nNom: <LaTex>{name}\nEmail:</LaTex>{email}\n\n👉 Activez le test ici: https://4k.cms-only.ru/addnew?t=lines`;
+        await global.sendWA(ADMIN_NUMBER, msg);
+        res.json({ success: true });
+    } else {
+        res.status(500).json({ error: "WhatsApp Bot not ready" });
+    }
 });
 
-app.use(cors());
-app.use(express.json());
+// إنشاء جلسة دفع Stripe
 app.post("/create-checkout-session", async (req, res) => {
+  try {
+    const plan = PLANS[req.body.planId];
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
-      line_items: [{ price: process.env[`STRIPE_PRICE_${req.body.planId.toUpperCase()}`], quantity: 1 }],
+      line_items: [{ price: plan.priceId, quantity: 1 }],
       metadata: { planId: req.body.planId },
       success_url: process.env.SITE_URL + "/succes.html",
       cancel_url: process.env.SITE_URL + "/annule.html",
     });
     res.json({ url: session.url });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.listen(process.env.PORT || 10000);
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log("Server Live on " + PORT));
+
 
 
 
