@@ -1,63 +1,51 @@
 const express = require("express");
 const cors = require("cors");
-const { exec } = require("child_process");
+const fs = require("fs");
 const Stripe = require("stripe");
 require("dotenv").config();
 
 const app = express();
-
-// --- يجب أن تكون هذه الأسطر في الأعلى دائماً ---
-app.use(cors()); 
+app.use(cors());
 app.use(express.json());
 
-// تشغيل البوت في نفس العملية لضمان وصول التنبيهات
-require('./whatsapp-bot.js');
-
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-const ADMIN_NUMBER = "213564653328@s.whatsapp.net";
+const LOG_FILE = "./orders_log.json";
 
-const PLANS = {
-  "1mois": { priceId: process.env.STRIPE_PRICE_1MOIS, label: "1 mois" },
-  "3mois": { priceId: process.env.STRIPE_PRICE_3MOIS, label: "3 mois" },
-  "6mois": { priceId: process.env.STRIPE_PRICE_6MOIS, label: "6 mois" },
-  "12mois": { priceId: process.env.STRIPE_PRICE_12MOIS, label: "12 mois" }
-};
-
-app.get("/", (req, res) => {
-  res.send("<h1>Server is Live and Running! 🚀</h1>");
-});
-
-app.post("/request-trial", async (req, res) => {
-    try {
-        const { email, name } = req.body;
-        console.log("Demande d'essai:", email);
-        
-        if (global.sendWA) {
-            const msg = `🎁 DEMANDE D'ESSAI (24H)\nNom: <LaTex>{name}\nEmail:</LaTex>{email}\n\n👉 Activez: https://4k.cms-only.ru/addnew?t=lines`;
-            await global.sendWA(ADMIN_NUMBER, msg);
-        }
-        res.json({ success: true });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+// وظيفة لحفظ الطلبات في ملف
+function saveOrder(data) {
+    let orders = [];
+    if (fs.existsSync(LOG_FILE)) {
+        orders = JSON.parse(fs.readFileSync(LOG_FILE));
     }
+    orders.unshift({ ...data, date: new Date().toLocaleString('fr-FR') });
+    fs.writeFileSync(LOG_FILE, JSON.stringify(orders, null, 2));
+}
+
+// --- الرابط السري الخاص بك لمراقبة الطلبات ---
+app.get("/admin-check-orders-secret-99", (req, res) => {
+    if (!fs.existsSync(LOG_FILE)) return res.send("<h1>Aucune commande pour le moment.</h1>");
+    const orders = JSON.parse(fs.readFileSync(LOG_FILE));
+    let html = "<h1>Liste des Commandes et Tests</h1><table border='1'><tr><th>Date</th><th>Type</th><th>Email</th></tr>";
+    orders.forEach(o => {
+        html += `<tr><td><LaTex>{o.date}</td><td></LaTex>{o.type}</td><td>${o.email}</td></tr>`;
+    });
+    html += "</table>";
+    res.send(html);
 });
 
-app.post("/create-checkout-session", async (req, res) => {
-  try {
-    const plan = PLANS[req.body.planId];
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      line_items: [{ price: plan.priceId, quantity: 1 }],
-      metadata: { planId: req.body.planId },
-      success_url: process.env.SITE_URL + "/succes.html",
-      cancel_url: process.env.SITE_URL + "/annule.html",
-    });
-    res.json({ url: session.url });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+app.post("/request-trial", (req, res) => {
+    const { email } = req.body;
+    saveOrder({ type: "TEST 24H", email: email });
+    // محاولة إرسال واتساب إذا كان متاحاً
+    if (global.sendWA) global.sendWA("213564653328@s.whatsapp.net", "🎁 TEST: " + email).catch(()=>{});
+    res.json({ success: true });
 });
+
+app.get("/", (req, res) => res.send("Neo4K Backend Live - Admin path ready"));
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log("Server Live on " + PORT));
+
 
 
 
