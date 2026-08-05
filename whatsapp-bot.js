@@ -3,14 +3,7 @@ if (!global.crypto) {
     global.crypto = nodeCrypto.webcrypto || nodeCrypto;
 }
 
-const { 
-    default: makeWASocket, 
-    useMultiFileAuthState, 
-    DisconnectReason, 
-    delay, 
-    fetchLatestBaileysVersion,
-    makeCacheableSignalKeyStore
-} = require("@whiskeysockets/baileys");
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay, fetchLatestBaileysVersion } = require("@whiskeysockets/baileys");
 const pino = require("pino");
 const { Boom } = require("@hapi/boom");
 const fs = require('fs');
@@ -29,10 +22,7 @@ async function connectToWhatsApp() {
     sock = makeWASocket({
         version,
         logger: pino({ level: 'silent' }),
-        auth: {
-            creds: state.creds,
-            keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' })),
-        },
+        auth: state,
         browser: ["Windows", "Chrome", "110.0.0.0"],
         connectTimeoutMs: 120000,
         defaultQueryTimeoutMs: 0,
@@ -53,8 +43,25 @@ async function connectToWhatsApp() {
         }
     };
 
+    global.requestNewPairingCode = async () => {
+        const phoneNumber = process.env.PHONE_NUMBER || "213564653328";
+        try {
+            console.log("Manual Request for Pairing Code for " + phoneNumber);
+            global.waPairingCode = "Génération... ⏳";
+            const code = await sock.requestPairingCode(phoneNumber.replace(/\D/g, ''));
+            global.waPairingCode = code;
+            fs.writeFileSync('pairing-code.txt', code);
+            console.log("NEW PAIRING CODE GENERATED: " + code);
+            return code;
+        } catch (e) {
+            console.error("Pairing Request Error:", e);
+            global.waPairingCode = "Erreur ❌";
+            return null;
+        }
+    };
+
     sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect } = update;
+        const { connection, lastDisconnect, qr } = update;
         
         if (connection === 'close') {
             global.waStatus = "Déconnecté ❌";
@@ -68,21 +75,12 @@ async function connectToWhatsApp() {
         } else if (connection === 'open') {
             global.waStatus = "Connecté ✅";
             global.waPairingCode = null;
+            if (fs.existsSync('pairing-code.txt')) fs.unlinkSync('pairing-code.txt');
             console.log("WhatsApp is Connected!");
         }
 
         if (!sock.authState.creds.registered && !global.waPairingCode) {
-            const phoneNumber = process.env.PHONE_NUMBER || "213564653328";
-            try {
-                console.log("Requesting Pairing Code for " + phoneNumber);
-                await delay(8000);
-                const code = await sock.requestPairingCode(phoneNumber.replace(/\D/g, ''));
-                global.waPairingCode = code;
-                console.log("PAIRING CODE GENERATED: " + code);
-            } catch (e) {
-                console.error("Pairing Request Error:", e);
-                setTimeout(() => { global.waPairingCode = null; }, 30000);
-            }
+            await global.requestNewPairingCode();
         }
     });
 }
