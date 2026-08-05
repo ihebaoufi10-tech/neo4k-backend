@@ -1,8 +1,8 @@
 FROM node:18
 
-# تثبيت المكتبات الأساسية
+# تثبيت متصفح Chromium وكل المكتبات اللازمة لتشغيله
 RUN apt-get update && apt-get install -y \
-    ca-certificates \
+    chromium \
     fonts-liberation \
     libasound2 \
     libatk-bridge2.0-0 \
@@ -36,14 +36,9 @@ RUN apt-get update && apt-get install -y \
     libxss1 \
     libxtst6 \
     lsb-release \
-    wget \
     xdg-utils \
-    --no-install-recommends
-
-# تحميل وتثبيت جوجل كروم مباشرة لضمان وجوده في /usr/bin/google-chrome
-RUN wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
-    && dpkg -i google-chrome-stable_current_amd64.deb; apt-get -fy install \
-    && rm google-chrome-stable_current_amd64.deb
+    --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/app
 
@@ -52,14 +47,15 @@ RUN npm install
 
 COPY . .
 
-# التأكد من أن Puppeteer يعرف مكان المتصفح
+# إخبار البوت بمكان متصفح Chromium الجديد
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 EXPOSE 10000
 
-# تأكد أن ملف التشغيل اسمه server.js (إذا كان server10.js غيره هنا)
+# تأكد من أن ملف التشغيل في GitHub اسمه server.js
 CMD [ "node", "server.js" ]
+
 
 
 
