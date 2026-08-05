@@ -1,17 +1,14 @@
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const qrcode = require("qrcode-terminal");
-const { exec } = require("child_process");
-const path = require("path");
-const fs = require("fs");
 
-// متغير لمنع تكرار الطلب
 let pairingCodeRequested = false;
 
 const client = new Client({
   authStrategy: new LocalAuth(),
   puppeteer: {
     headless: true,
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
+    // نستخدم المسار الصحيح مباشرة هنا لضمان النجاح
+    executablePath: '/usr/bin/google-chrome-stable',
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
@@ -30,7 +27,8 @@ client.on("qr", async (qr) => {
   const phoneNumber = process.env.PHONE_NUMBER;
   if (phoneNumber && !pairingCodeRequested) {
     pairingCodeRequested = true;
-    console.log(`Waiting 10 seconds before requesting pairing code for: ${phoneNumber}...`);
+    // زيادة الانتظار لـ 15 ثانية لضمان استقرار السيرفر
+    console.log(`Waiting 15 seconds before requesting pairing code for: ${phoneNumber}...`);
     
     setTimeout(async () => {
       try {
@@ -42,9 +40,9 @@ client.on("qr", async (qr) => {
         console.log("==========================================");
       } catch (err) {
         console.error("Error requesting pairing code:", err);
-        pairingCodeRequested = false; // السماح بالمحاولة مرة أخرى في حال الفشل
+        pairingCodeRequested = false; 
       }
-    }, 10000); // زيادة الوقت لـ 10 ثوانٍ
+    }, 15000);
   }
 });
 
@@ -53,9 +51,10 @@ client.on("ready", () => {
   pairingCodeRequested = false;
 });
 
-client.on("authenticated", () => console.log("Authenticated successfully!"));
-
 client.initialize();
+
+// بقية كود الرسائل يبقى كما هو بالأسفل...
+
 
 // بقية الكود الخاص بمعالجة الرسائل (client.on("message", ...)) يبقى كما هو تحت هذا السطر
 
