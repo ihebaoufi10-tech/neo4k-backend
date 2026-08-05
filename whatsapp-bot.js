@@ -2,14 +2,17 @@ const { default: makeWASocket, useMultiFileAuthState, delay, fetchLatestBaileysV
 const pino = require("pino");
 const fs = require('fs');
 
+
 global.waStatus = "Initialisation...";
 global.waPairingCode = null;
+
 
 async function connectToWhatsApp() {
     // Cleanup to force new code
     if (fs.existsSync('./session_final')) {
         try { fs.rmSync('./session_final', { recursive: true, force: true }); } catch (e) {}
     }
+
 
     const { state, saveCreds } = await useMultiFileAuthState('./session_final');
     
@@ -20,6 +23,7 @@ async function connectToWhatsApp() {
         // Use a more standard browser string
         browser: ["Ubuntu", "Chrome", "110.0.5481.177"]
     });
+
 
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect } = update;
@@ -34,6 +38,7 @@ async function connectToWhatsApp() {
         }
     });
 
+
     if (!sock.authState.creds.registered) {
         setTimeout(async () => {
             try {
@@ -47,7 +52,9 @@ async function connectToWhatsApp() {
         }, 5000);
     }
 
+
     sock.ev.on('creds.update', saveCreds);
+
 
     global.sendWA = async (jid, text) => {
         try {
@@ -58,5 +65,9 @@ async function connectToWhatsApp() {
     };
 }
 
+
 connectToWhatsApp();
 module.exports = { connectToWhatsApp };
+
+
+// Restart for fresh pairing code: 1785960950512
