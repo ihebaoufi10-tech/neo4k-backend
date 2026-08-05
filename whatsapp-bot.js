@@ -1,6 +1,7 @@
-// 1. تعريف التشفير بشكل عالمي في أول سطر
-const crypto = require('crypto');
-global.crypto = crypto; 
+const nodeCrypto = require('crypto');
+if (!global.crypto) {
+    global.crypto = nodeCrypto.webcrypto;
+}
 
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay, fetchLatestBaileysVersion } = require("@whiskeysockets/baileys");
 const pino = require("pino");
@@ -8,43 +9,50 @@ const qrcode = require("qrcode-terminal");
 const { Boom } = require("@hapi/boom");
 
 async function connectToWhatsApp() {
-    // استخدام اسم مجلد جديد تماماً لمسح أي ملفات تالفة
-    const { state, saveCreds } = await useMultiFileAuthState('session_baileys_final');
+    // تغيير اسم المجلد لـ "session_final_fix" لضمان بداية نظيفة 100%
+    const { state, saveCreds } = await useMultiFileAuthState('session_final_fix');
     const { version } = await fetchLatestBaileysVersion();
 
-    console.log("Starting WhatsApp Connection (Baileys v" + version.join('.') + ")...");
+    console.log("Connecting to WhatsApp (Version: " + version.join('.') + ")...");
 
     const sock = makeWASocket({
         version,
         logger: pino({ level: 'silent' }),
         auth: state,
         printQRInTerminal: true,
-        browser: ["NEO 4K PRO", "Chrome", "1.0.0"],
+        // استخدام هوية متصفح قياسية جداً
+        browser: ["Ubuntu", "Chrome", "110.0.5563.147"],
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 0,
-        keepAliveIntervalMs: 10000
+        keepAliveIntervalMs: 10000,
+        // إضافة خيار لتقليل الضغط على السيرفر
+        shouldIgnoreJid: (jid) => jid.includes('@broadcast')
     });
 
     sock.ev.on('creds.update', saveCreds);
 
+    let codeRequested = false;
+
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
         
-        if (qr) {
-            console.log("=== NEW QR CODE GENERATED ===");
-            qrcode.generate(qr, { small: true });
+        if (qr && !codeRequested) {
+            codeRequested = true;
+            console.log("=== NEW QR READY - STABILIZING FOR 25 SECONDS ===");
             
             const phoneNumber = process.env.PHONE_NUMBER;
             if (phoneNumber) {
                 try {
-                    await delay(20000); // زيادة وقت الانتظار لـ 20 ثانية
-                    console.log("Requesting Pairing Code for:", phoneNumber);
-                    const code = await sock.requestPairingCode(phoneNumber.replace('+', ''));
+                    // زيادة وقت الانتظار لـ 25 ثانية لضمان استقرار الاتصال بالكامل
+                    await delay(25000); 
+                    console.log("REQUESTING PAIRING CODE FOR:", phoneNumber);
+                    const code = await sock.requestPairingCode(phoneNumber.replace('+', '').trim());
                     console.log("*********************************");
                     console.log("YOUR WHATSAPP CODE IS:", code);
                     console.log("*********************************");
                 } catch (e) {
-                    console.log("WhatsApp busy or rate-limited. Retrying later...");
+                    console.log("WhatsApp busy. Will try again in the next cycle.");
+                    codeRequested = false;
                 }
             }
         }
@@ -55,18 +63,19 @@ async function connectToWhatsApp() {
             
             console.log('Connection closed. Status:', statusCode, 'Error:', error?.message);
             
-            if (statusCode !== DisconnectReason.loggedOut) {
-                console.log("Reconnecting in 15 seconds...");
-                setTimeout(() => connectToWhatsApp(), 15000);
-            }
+            // إذا كان الخطأ 401، سننتظر وقتاً أطول قبل إعادة المحاولة
+            const retryDelay = (statusCode === 401) ? 40000 : 20000;
+            console.log(`Retrying in ${retryDelay/1000} seconds...`);
+            setTimeout(() => connectToWhatsApp(), retryDelay);
         } else if (connection === 'open') {
             console.log("SUCCESS: WHATSAPP CONNECTED!");
+            codeRequested = false;
         }
     });
 }
 
-// تشغيل البوت
-connectToWhatsApp().catch(err => console.log("Critical Error:", err));
+connectToWhatsApp().catch(err => console.log("Main Error:", err));
+
 
 
 
