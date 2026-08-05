@@ -9,50 +9,47 @@ const qrcode = require("qrcode-terminal");
 const { Boom } = require("@hapi/boom");
 
 async function connectToWhatsApp() {
-    // تغيير اسم المجلد لـ "session_final_fix" لضمان بداية نظيفة 100%
-    const { state, saveCreds } = await useMultiFileAuthState('session_final_fix');
+    // استخدام اسم مجلد جديد كلياً لمسح أي محاولات فاشلة
+    const { state, saveCreds } = await useMultiFileAuthState('session_fast_connect');
     const { version } = await fetchLatestBaileysVersion();
 
-    console.log("Connecting to WhatsApp (Version: " + version.join('.') + ")...");
+    console.log("Fast Connect Starting...");
 
     const sock = makeWASocket({
         version,
         logger: pino({ level: 'silent' }),
         auth: state,
         printQRInTerminal: true,
-        // استخدام هوية متصفح قياسية جداً
-        browser: ["Ubuntu", "Chrome", "110.0.5563.147"],
-        connectTimeoutMs: 60000,
+        browser: ["Windows", "Chrome", "110.0.0.0"],
+        // إعدادات السرعة القصوى
+        connectTimeoutMs: 120000, // زيادة الوقت لـ 120 ثانية
         defaultQueryTimeoutMs: 0,
-        keepAliveIntervalMs: 10000,
-        // إضافة خيار لتقليل الضغط على السيرفر
-        shouldIgnoreJid: (jid) => jid.includes('@broadcast')
+        syncFullHistory: false, // لا نريد أي رسائل قديمة
+        linkPreview: false, // لا نريد معاينة الروابط
+        getMessage: async (key) => { return { conversation: 'Welcome' } }
     });
 
     sock.ev.on('creds.update', saveCreds);
 
-    let codeRequested = false;
+    let codeSent = false;
 
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
         
-        if (qr && !codeRequested) {
-            codeRequested = true;
-            console.log("=== NEW QR READY - STABILIZING FOR 25 SECONDS ===");
-            
+        if (qr && !codeSent) {
+            codeSent = true;
+            // تقليل وقت الانتظار لـ 10 ثواني فقط لربح الوقت
+            await delay(10000); 
             const phoneNumber = process.env.PHONE_NUMBER;
             if (phoneNumber) {
                 try {
-                    // زيادة وقت الانتظار لـ 25 ثانية لضمان استقرار الاتصال بالكامل
-                    await delay(25000); 
-                    console.log("REQUESTING PAIRING CODE FOR:", phoneNumber);
+                    console.log("REQUESTING CODE NOW...");
                     const code = await sock.requestPairingCode(phoneNumber.replace('+', '').trim());
                     console.log("*********************************");
-                    console.log("YOUR WHATSAPP CODE IS:", code);
+                    console.log("YOUR CODE IS:", code);
                     console.log("*********************************");
                 } catch (e) {
-                    console.log("WhatsApp busy. Will try again in the next cycle.");
-                    codeRequested = false;
+                    codeSent = false;
                 }
             }
         }
@@ -60,21 +57,19 @@ async function connectToWhatsApp() {
         if (connection === 'close') {
             const error = lastDisconnect?.error;
             const statusCode = error instanceof Boom ? error.output.statusCode : null;
-            
-            console.log('Connection closed. Status:', statusCode, 'Error:', error?.message);
-            
-            // إذا كان الخطأ 401، سننتظر وقتاً أطول قبل إعادة المحاولة
-            const retryDelay = (statusCode === 401) ? 40000 : 20000;
-            console.log(`Retrying in ${retryDelay/1000} seconds...`);
-            setTimeout(() => connectToWhatsApp(), retryDelay);
+            console.log('Closed. Status:', statusCode);
+            if (statusCode !== DisconnectReason.loggedOut) {
+                setTimeout(() => connectToWhatsApp(), 10000);
+            }
         } else if (connection === 'open') {
             console.log("SUCCESS: WHATSAPP CONNECTED!");
-            codeRequested = false;
+            codeSent = false;
         }
     });
 }
 
-connectToWhatsApp().catch(err => console.log("Main Error:", err));
+connectToWhatsApp().catch(err => console.log("Error:", err));
+
 
 
 
