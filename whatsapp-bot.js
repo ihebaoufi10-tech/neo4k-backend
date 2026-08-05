@@ -61,14 +61,12 @@ async function connectToWhatsApp() {
     };
 
     sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect, qr } = update;
-        
+        const { connection, lastDisconnect } = update;
         if (connection === 'close') {
             global.waStatus = "Déconnecté ❌";
             const error = lastDisconnect?.error;
             const statusCode = error instanceof Boom ? error.output.statusCode : null;
             console.log('Connection closed. Status:', statusCode);
-            
             if (statusCode !== DisconnectReason.loggedOut) {
                 setTimeout(connectToWhatsApp, 10000);
             }
@@ -78,7 +76,7 @@ async function connectToWhatsApp() {
             if (fs.existsSync('pairing-code.txt')) fs.unlinkSync('pairing-code.txt');
             console.log("WhatsApp is Connected!");
         }
-
+        
         if (!sock.authState.creds.registered && !global.waPairingCode) {
             await global.requestNewPairingCode();
         }
