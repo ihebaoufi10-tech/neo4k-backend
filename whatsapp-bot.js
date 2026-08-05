@@ -7,7 +7,6 @@ const client = new Client({
   authStrategy: new LocalAuth(),
   puppeteer: {
     headless: true,
-    // نستخدم المسار الصحيح مباشرة هنا لضمان النجاح
     executablePath: '/usr/bin/google-chrome-stable',
     args: [
       "--no-sandbox",
@@ -15,34 +14,38 @@ const client = new Client({
       "--disable-dev-shm-usage",
       "--disable-gpu",
       "--no-zygote",
-      "--single-process"
+      "--single-process",
+      "--disable-extensions",
+      "--disable-software-rasterizer",
+      "--memory-pressure-off"
     ],
   },
 });
 
 client.on("qr", async (qr) => {
-  console.log("QR Code received. Generating ASCII...");
+  console.log("QR Code received.");
+  // عرض الـ QR كخيار احتياطي في السجلات
   qrcode.generate(qr, { small: true });
 
   const phoneNumber = process.env.PHONE_NUMBER;
   if (phoneNumber && !pairingCodeRequested) {
     pairingCodeRequested = true;
-    // زيادة الانتظار لـ 15 ثانية لضمان استقرار السيرفر
-    console.log(`Waiting 15 seconds before requesting pairing code for: ${phoneNumber}...`);
+    // ننتظر 20 ثانية كاملة ليتنفس السيرفر قبل طلب الرمز
+    console.log(`Waiting 20 seconds for stability before requesting code for: ${phoneNumber}...`);
     
     setTimeout(async () => {
       try {
-        console.log("Sending request for pairing code now...");
+        console.log("Requesting pairing code now...");
         const pairingCode = await client.requestPairingCode(phoneNumber);
         console.log("==========================================");
         console.log("YOUR WHATSAPP PAIRING CODE:");
         console.log(pairingCode);
         console.log("==========================================");
       } catch (err) {
-        console.error("Error requesting pairing code:", err);
+        console.error("Pairing code error:", err.message);
         pairingCodeRequested = false; 
       }
-    }, 15000);
+    }, 20000);
   }
 });
 
@@ -51,10 +54,14 @@ client.on("ready", () => {
   pairingCodeRequested = false;
 });
 
-client.initialize();
+// التعامل مع انقطاع الاتصال
+client.on("disconnected", (reason) => {
+  console.log("Client was logged out", reason);
+  pairingCodeRequested = false;
+});
 
-// بقية كود الرسائل يبقى كما هو بالأسفل...
+client.initialize().catch(err => {
+  console.error("Initialization error:", err);
+});
 
-
-// بقية الكود الخاص بمعالجة الرسائل (client.on("message", ...)) يبقى كما هو تحت هذا السطر
 
