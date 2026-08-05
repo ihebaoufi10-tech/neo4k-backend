@@ -2,17 +2,14 @@ const { default: makeWASocket, useMultiFileAuthState, delay, fetchLatestBaileysV
 const pino = require("pino");
 const fs = require('fs');
 
-
 global.waStatus = "Initialisation...";
 global.waPairingCode = null;
 
-
 async function connectToWhatsApp() {
-    // Cleanup to force new code
+    // Cleanup
     if (fs.existsSync('./session_final')) {
         try { fs.rmSync('./session_final', { recursive: true, force: true }); } catch (e) {}
     }
-
 
     const { state, saveCreds } = await useMultiFileAuthState('./session_final');
     
@@ -20,10 +17,9 @@ async function connectToWhatsApp() {
         auth: state,
         printQRInTerminal: false,
         logger: pino({ level: 'silent' }),
-        // Use a more standard browser string
-        browser: ["Ubuntu", "Chrome", "110.0.5481.177"]
+        // Use Mac OS for better compatibility
+        browser: ['Mac OS', 'Chrome', '110.0.5481.177']
     });
-
 
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect } = update;
@@ -38,23 +34,20 @@ async function connectToWhatsApp() {
         }
     });
 
-
     if (!sock.authState.creds.registered) {
+        // Increased delay to 10s for stability
         setTimeout(async () => {
             try {
-                // The phone number must be without + but with country code
                 let code = await sock.requestPairingCode("213564653328");
                 global.waPairingCode = code;
                 global.waStatus = "En attente de couplage... 🔑";
             } catch (e) {
                 global.waStatus = "Erreur de code ❌";
             }
-        }, 5000);
+        }, 10000);
     }
 
-
     sock.ev.on('creds.update', saveCreds);
-
 
     global.sendWA = async (jid, text) => {
         try {
@@ -65,9 +58,5 @@ async function connectToWhatsApp() {
     };
 }
 
-
 connectToWhatsApp();
 module.exports = { connectToWhatsApp };
-
-
-// Restart for fresh pairing code: 1785960950512
