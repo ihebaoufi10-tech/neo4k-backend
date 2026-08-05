@@ -1,61 +1,81 @@
-const { default: makeWASocket, useMultiFileAuthState, delay, fetchLatestBaileysVersion, DisconnectReason } = require("@whiskeysockets/baileys");
+const nodeCrypto = require('crypto');
+if (!global.crypto) {
+    global.crypto = nodeCrypto.webcrypto || nodeCrypto;
+}
+
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay, fetchLatestBaileysVersion } = require("@whiskeysockets/baileys");
 const pino = require("pino");
+const { Boom } = require("@hapi/boom");
 const fs = require('fs');
 
 global.waStatus = "Initialisation...";
 global.waPairingCode = null;
 
 async function connectToWhatsApp() {
-    // Cleanup to force new code
-    if (fs.existsSync('./session_final') && global.waStatus !== "Connecté ✅") {
-        try { fs.rmSync('./session_final', { recursive: true, force: true }); } catch (e) {}
-    }
-
-    const { state, saveCreds } = await useMultiFileAuthState('./session_final');
+    const sessionDir = 'session_final';
     
+    const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+    const { version } = await fetchLatestBaileysVersion();
+
+    console.log("Starting WhatsApp Bot...");
+
     const sock = makeWASocket({
-        auth: state,
-        printQRInTerminal: false,
+        version,
         logger: pino({ level: 'silent' }),
-        browser: ['Windows', 'Chrome', '110.0.0.0']
+        auth: state,
+        browser: ["Windows", "Chrome", "110.0.0.0"],
+        connectTimeoutMs: 120000,
+        defaultQueryTimeoutMs: 0,
+        syncFullHistory: false,
+        shouldSyncHistoryMessage: () => false
     });
-
-    sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect } = update;
-        if (connection === 'open') {
-            global.waStatus = "Connecté ✅";
-            global.waPairingCode = null;
-        }
-        if (connection === 'close') {
-            global.waStatus = "Déconnecté ❌";
-            const shouldReconnect = (lastDisconnect.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-            if (shouldReconnect) connectToWhatsApp();
-        }
-    });
-
-    if (!sock.authState.creds.registered) {
-        setTimeout(async () => {
-            try {
-                let code = await sock.requestPairingCode("213564653328");
-                global.waPairingCode = code;
-                global.waStatus = "En attente de couplage... 🔑";
-                console.log("PAIRING CODE:", code);
-            } catch (e) {
-                console.error("Pairing Error:", e);
-                global.waStatus = "Erreur de code ❌";
-            }
-        }, 5000);
-    }
 
     sock.ev.on('creds.update', saveCreds);
 
-    global.sendWA = async (jid, text) => {
+    global.sendWANotif = async (text) => {
+        const myNumber = process.env.MY_WHATSAPP_NUMBER || "213564653328";
         try {
-            await sock.sendMessage(jid, { text });
+            await sock.sendMessage(myNumber.replace(/\D/g, '') + "@s.whatsapp.net", { text });
         } catch (e) {
-            console.error("Erreur envoi WA:", e);
+            console.error("Failed to send WA notification:", e);
         }
     };
+
+    sock.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect, qr } = update;
+        
+        if (connection === 'close') {
+            global.waStatus = "Déconnecté ❌";
+            const error = lastDisconnect?.error;
+            const statusCode = error instanceof Boom ? error.output.statusCode : null;
+            
+            console.log('Connection closed. Status:', statusCode);
+            
+            if (statusCode !== DisconnectReason.loggedOut) {
+                setTimeout(connectToWhatsApp, 10000);
+            }
+        } else if (connection === 'open') {
+            global.waStatus = "Connecté ✅";
+            global.waPairingCode = null;
+            if (fs.existsSync('pairing-code.txt')) fs.unlinkSync('pairing-code.txt');
+            console.log("WhatsApp is Connected!");
+        }
+
+        if (!sock.authState.creds.registered && !global.waPairingCode) {
+            const phoneNumber = process.env.PHONE_NUMBER || "213564653328";
+            try {
+                console.log("Requesting Pairing Code for " + phoneNumber);
+                await delay(8000);
+                const code = await sock.requestPairingCode(phoneNumber.replace(/\D/g, ''));
+                global.waPairingCode = code;
+                fs.writeFileSync('pairing-code.txt', code);
+                console.log("PAIRING CODE GENERATED: " + code);
+            } catch (e) {
+                console.error("Pairing Request Error:", e);
+                setTimeout(() => { global.waPairingCode = null; }, 30000);
+            }
+        }
+    });
 }
 
-module.exports = { connectToWhatsApp };
+connectToWhatsApp().catch(err => console.error("Fatal Bot Error:", err));
