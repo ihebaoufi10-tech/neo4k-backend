@@ -2,20 +2,38 @@ const express = require("express");
 const cors = require("cors");
 const fs = require("fs");
 const Stripe = require("stripe");
+const path = require("path");
 require("dotenv").config();
+
+// Initialiser WhatsApp
+const wa = require('./whatsapp-bot');
+wa.connectToWhatsApp();
 
 const app = express();
 app.use(cors());
 
-// Simulation de l'envoi WhatsApp (global.sendWA est défini dans automation.js)
+const LOG_FILE = path.join(__dirname, "orders_log.json");
+
 const notifyWA = (msg) => {
-    if (global.sendWA) {
-        global.sendWA("213564653328@s.whatsapp.net", msg).catch(e => console.error("WA Error:", e));
+    if (global.sendWA && global.waStatus && global.waStatus.includes("Connecté")) {
+        global.sendWA("213564653328@s.whatsapp.net", msg).catch(e => console.error("WA Notify Error:", e));
     } else {
-        console.log("WA Notification (Dry Run):", msg);
+        console.log("WA Notification (Pending):", msg);
     }
 };
 
+function saveOrder(data) {
+    let orders = [];
+    if (fs.existsSync(LOG_FILE)) {
+        try {
+            orders = JSON.parse(fs.readFileSync(LOG_FILE, 'utf8'));
+        } catch (e) { orders = []; }
+    }
+    orders.unshift({ ...data, date: new Date().toLocaleString('fr-FR') });
+    fs.writeFileSync(LOG_FILE, JSON.stringify(orders, null, 2));
+}
+
+// Webhook Stripe
 app.post("/webhook", express.raw({ type: "application/json" }), (req, res) => {
     const sig = req.headers["stripe-signature"];
     let event;
@@ -28,44 +46,59 @@ app.post("/webhook", express.raw({ type: "application/json" }), (req, res) => {
     if (event.type === "checkout.session.completed") {
         const session = event.data.object;
         const whatsapp = session.metadata.whatsapp || "Non fourni";
-        saveOrder({
-            type: "PAIEMENT RÉUSSI",
-            email: session.customer_details.email,
-            whatsapp: whatsapp,
-            plan: session.metadata.planId,
-            amount: session.amount_total / 100
+        saveOrder({ 
+            type: "PAIEMENT", 
+            email: session.customer_details.email, 
+            whatsapp: whatsapp, 
+            plan: session.metadata.planId, 
+            amount: session.amount_total / 100 
         });
-        notifyWA(`💰 NOUVELLE COMMANDE !\nEmail: ${session.customer_details.email}\nWhatsApp: ${whatsapp}\nPlan: ${session.metadata.planId}`);
+        notifyWA(`💰 COMMANDE RÉUSSIE\nEmail: ${session.customer_details.email}\nWhatsApp: ${whatsapp}\nPlan: ${session.metadata.planId}`);
     }
     res.json({ received: true });
 });
 
 app.use(express.json());
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-const LOG_FILE = "./orders_log.json";
 
-const PLANS = {
-    "1mois": { priceId: process.env.STRIPE_PRICE_1MOIS },
-    "3mois": { priceId: process.env.STRIPE_PRICE_3MOIS },
-    "6mois": { priceId: process.env.STRIPE_PRICE_6MOIS },
-    "12mois": { priceId: process.env.STRIPE_PRICE_12MOIS }
-};
+// Trial Request
+app.post("/request-trial", (req, res) => {
+    const { email, whatsapp } = req.body;
+    if (!email || !whatsapp) return res.status(400).json({ error: "Missing data" });
+    
+    saveOrder({ type: "TEST 24H", email, whatsapp, plan: "TEST 24H" });
+    notifyWA(`🎁 DEMANDE TEST 24H\nEmail: ${email}\nWhatsApp: ${whatsapp}`);
+    res.json({ success: true });
+});
 
-function saveOrder(data) {
-    let orders = [];
-    if (fs.existsSync(LOG_FILE)) {
-        try { orders = JSON.parse(fs.readFileSync(LOG_FILE)); } catch (e) { orders = []; }
+// Checkout Session
+app.post("/create-checkout-session", async (req, res) => {
+    const { planId, whatsapp } = req.body;
+    const priceKey = `STRIPE_PRICE_${planId.toUpperCase()}`;
+    const priceId = process.env[priceKey];
+
+    try {
+        const session = await stripe.checkout.sessions.create({
+            payment_method_types: ["card"],
+            line_items: [{ price: priceId, quantity: 1 }],
+            mode: "payment",
+            success_url: "https://neo4k-site-v2.onrender.com/?success=true",
+            cancel_url: "https://neo4k-site-v2.onrender.com/?canceled=true",
+            metadata: { planId, whatsapp }
+        });
+        res.json({ id: session.id });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
     }
-    orders.unshift({ ...data, date: new Date().toLocaleString('fr-FR') });
-    fs.writeFileSync(LOG_FILE, JSON.stringify(orders, null, 2));
-}
+});
 
+// Admin Dashboard
 app.get("/admin-check-orders-secret-99", (req, res) => {
     let orders = [];
     if (fs.existsSync(LOG_FILE)) {
-        try { orders = JSON.parse(fs.readFileSync(LOG_FILE)); } catch (e) { orders = []; }
+        try { orders = JSON.parse(fs.readFileSync(LOG_FILE, 'utf8')); } catch (e) {}
     }
-    
+
     let html = `
     <!DOCTYPE html>
     <html lang="fr">
@@ -75,32 +108,38 @@ app.get("/admin-check-orders-secret-99", (req, res) => {
         <title>Admin - Neo4K Pro</title>
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Unbounded:wght@700&display=swap" rel="stylesheet">
         <style>
-            :root { --bg: #0A0D13; --surface: #121828; --border: #242C42; --text: #E9EDF5; --text-dim: #8C97AE; --cyan: #2DD4A7; }
+            :root { --bg: #0A0D13; --surface: #121828; --border: #242C42; --text: #E9EDF5; --text-dim: #8C97AE; --cyan: #2DD4A7; --orange: #F59E0B; }
             body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; margin: 0; padding: 20px; }
             .container { max-width: 1000px; margin: 0 auto; }
-            h1 { font-family: 'Unbounded'; font-size: 24px; color: var(--cyan); margin-bottom: 30px; text-align: center; }
+            .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
+            h1 { font-family: 'Unbounded'; font-size: 22px; color: var(--cyan); margin: 0; }
+            .status-bar { background: var(--surface); border: 1px solid var(--border); padding: 15px; border-radius: 12px; margin-bottom: 20px; display: flex; align-items: center; gap: 20px; }
+            .pairing-code { background: #000; color: var(--orange); padding: 5px 15px; border-radius: 6px; font-family: monospace; font-weight: bold; font-size: 18px; border: 1px dashed var(--orange); }
             .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
             table { width: 100%; border-collapse: collapse; text-align: left; }
-            th { background: rgba(255,255,255,0.05); padding: 15px; font-size: 13px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
-            td { padding: 15px; border-top: 1px solid var(--border); font-size: 14px; vertical-align: middle; }
-            tr:hover { background: rgba(45, 212, 167, 0.03); }
-            .badge { padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 800; display: inline-block; }
-            .badge-paid { background: rgba(45, 212, 167, 0.1); color: var(--cyan); }
-            .badge-test { background: rgba(255, 184, 77, 0.1); color: #FFB84D; }
-            .email { font-weight: 600; color: #fff; display: block; }
-            .whatsapp { color: var(--cyan); font-weight: 700; text-decoration: none; display: inline-flex; align-items: center; gap: 5px; margin-top: 5px; }
-            .whatsapp:hover { text-decoration: underline; }
-            .date { color: var(--text-dim); font-family: monospace; font-size: 12px; }
-            .empty { padding: 40px; text-align: center; color: var(--text-dim); }
-            @media (max-width: 768px) {
-                th:nth-child(1) { display: none; }
-                td:nth-child(1) { display: none; }
-            }
+            th { background: rgba(255,255,255,0.03); padding: 15px; font-size: 12px; text-transform: uppercase; color: var(--text-dim); border-bottom: 1px solid var(--border); }
+            td { padding: 15px; border-bottom: 1px solid var(--border); font-size: 14px; }
+            tr:last-child td { border-bottom: none; }
+            .badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+            .badge-test { background: rgba(245, 158, 11, 0.1); color: #F59E0B; }
+            .badge-pay { background: rgba(45, 212, 167, 0.1); color: #2DD4A7; }
+            .wa-link { color: var(--cyan); text-decoration: none; display: flex; align-items: center; gap: 5px; }
+            .wa-link:hover { text-decoration: underline; }
+            @media (max-width: 600px) { th:nth-child(1), td:nth-child(1) { display: none; } }
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>Neo4K Pro - Gestion des Commandes</h1>
+            <div class="header">
+                <h1>Neo4K Pro Admin</h1>
+                <div style="font-size: 12px; color: var(--text-dim)">Dernière mise à jour: ${new Date().toLocaleTimeString()}</div>
+            </div>
+
+            <div class="status-bar">
+                <div>Statut WhatsApp: <strong>${global.waStatus || 'Déconnecté'}</strong></div>
+                ${global.waPairingCode ? `<div>Code de couplage: <span class="pairing-code">${global.waPairingCode}</span></div>` : ''}
+            </div>
+
             <div class="card">
                 <table>
                     <thead>
@@ -112,66 +151,29 @@ app.get("/admin-check-orders-secret-99", (req, res) => {
                         </tr>
                     </thead>
                     <tbody>
-    `;
-    
-    if (orders.length === 0) {
-        html += '<tr><td colspan="4" class="empty">Aucune commande enregistrée pour le moment.</td></tr>';
-    } else {
-        orders.forEach(o => {
-            const typeClass = o.type.includes('PAIEMENT') ? 'badge-paid' : 'badge-test';
-            const waLink = o.whatsapp && o.whatsapp !== 'Non fourni' ? 
-                `<a href="https://wa.me/${o.whatsapp.replace(/\D/g,'')}" class="whatsapp" target="_blank">📱 ${o.whatsapp}</a>` : 
-                '<span style="color:var(--text-dim)">WhatsApp non fourni</span>';
-            
-            html += `
-                <tr>
-                    <td class="date">${o.date}</td>
-                    <td><span class="badge ${typeClass}">${o.type}</span></td>
-                    <td>
-                        <span class="email">${o.email}</span>
-                        ${waLink}
-                    </td>
-                    <td><strong style="color:var(--cyan)">${o.plan || 'TEST 24H'}</strong></td>
-                </tr>
-            `;
-        });
-    }
-    
-    html += `
+                        ${orders.map(o => `
+                            <tr>
+                                <td style="color: var(--text-dim)">${o.date}</td>
+                                <td><span class="badge ${o.type === 'TEST 24H' ? 'badge-test' : 'badge-pay'}">${o.type}</span></td>
+                                <td>
+                                    <div style="font-weight: 600">${o.email}</div>
+                                    <a href="https://wa.me/${o.whatsapp.replace(/\+/g, '')}" target="_blank" class="wa-link">
+                                        📱 ${o.whatsapp}
+                                    </a>
+                                </td>
+                                <td><strong>${o.plan}</strong></td>
+                            </tr>
+                        `).join('')}
                     </tbody>
                 </table>
             </div>
-            <p style="text-align:center; margin-top:30px; color:var(--text-dim); font-size:12px;">Système automatisé Neo4K Pro</p>
         </div>
+        <script>setTimeout(() => location.reload(), 30000);</script>
     </body>
     </html>
     `;
     res.send(html);
 });
 
-app.post("/create-checkout-session", async (req, res) => {
-    try {
-        const { planId, whatsapp } = req.body;
-        const plan = PLANS[planId];
-        if (!plan || !plan.priceId) throw new Error("Plan invalide");
-        const session = await stripe.checkout.sessions.create({
-            mode: "payment",
-            line_items: [{ price: plan.priceId, quantity: 1 }],
-            metadata: { planId: planId, whatsapp: whatsapp },
-            success_url: process.env.SITE_URL + "/succes.html",
-            cancel_url: process.env.SITE_URL + "/annule.html",
-        });
-        res.json({ url: session.url });
-    } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post("/request-trial", (req, res) => {
-    const { email, whatsapp } = req.body;
-    saveOrder({ type: "TEST 24H", email: email, whatsapp: whatsapp });
-    notifyWA(`🎁 DEMANDE TEST 24H\nEmail: ${email}\nWhatsApp: ${whatsapp}`);
-    res.json({ success: true });
-});
-
-app.get("/", (req, res) => res.send("Neo4K Backend Live"));
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log("Server Live on " + PORT));
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
