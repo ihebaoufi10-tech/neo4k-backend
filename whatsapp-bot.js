@@ -1,17 +1,24 @@
-const { default: makeWASocket, useMultiFileAuthState, delay, fetchLatestBaileysVersion } = require("@whiskeysockets/baileys");
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay, fetchLatestBaileysVersion } = require("@whiskeysockets/baileys");
 const pino = require("pino");
 const qrcode = require("qrcode-terminal");
+const { Boom } = require("@hapi/boom");
 
 async function connectToWhatsApp() {
-    const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
+    // قمنا بتغيير الاسم هنا لضمان مسح أي أخطاء قديمة
+    const { state, saveCreds } = await useMultiFileAuthState('session_new');
     const { version } = await fetchLatestBaileysVersion();
+
+    console.log("Starting WhatsApp Connection (Baileys v" + version.join('.') + ")...");
 
     const sock = makeWASocket({
         version,
         logger: pino({ level: 'silent' }),
         auth: state,
         printQRInTerminal: true,
-        browser: ["NEO 4K PRO", "Chrome", "1.0.0"]
+        browser: ["NEO 4K PRO", "Chrome", "1.0.0"],
+        connectTimeoutMs: 60000,
+        defaultQueryTimeoutMs: 0,
+        keepAliveIntervalMs: 10000
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -20,35 +27,43 @@ async function connectToWhatsApp() {
         const { connection, lastDisconnect, qr } = update;
         
         if (qr) {
-            console.log("=== SCAN QR OR WAIT FOR CODE ===");
+            console.log("=== NEW QR CODE GENERATED ===");
             qrcode.generate(qr, { small: true });
             
             const phoneNumber = process.env.PHONE_NUMBER;
             if (phoneNumber) {
                 try {
-                    // انتظار 10 ثواني لضمان استقرار الاتصال
-                    await delay(10000);
+                    await delay(15000);
                     console.log("Requesting Pairing Code for:", phoneNumber);
                     const code = await sock.requestPairingCode(phoneNumber.replace('+', ''));
                     console.log("*********************************");
-                    console.log("YOUR NEW WHATSAPP CODE IS:", code);
+                    console.log("YOUR WHATSAPP CODE IS:", code);
                     console.log("*********************************");
                 } catch (e) {
-                    console.log("WhatsApp busy, will retry in 30s...");
+                    console.log("WhatsApp busy, please wait or scan QR.");
                 }
             }
         }
 
         if (connection === 'close') {
-            console.log("Connection closed, reconnecting...");
-            setTimeout(() => connectToWhatsApp(), 5000);
+            const error = lastDisconnect?.error;
+            const statusCode = error instanceof Boom ? error.output.statusCode : null;
+            
+            console.log('Connection closed. Status:', statusCode, 'Error:', error?.message);
+            
+            // إعادة المحاولة فقط إذا لم يكن خروجاً متعاداً، ومع انتظار 10 ثوانٍ
+            if (statusCode !== DisconnectReason.loggedOut) {
+                console.log("Reconnecting in 10 seconds...");
+                setTimeout(() => connectToWhatsApp(), 10000);
+            }
         } else if (connection === 'open') {
             console.log("SUCCESS: WHATSAPP CONNECTED!");
         }
     });
 }
 
-connectToWhatsApp();
+connectToWhatsApp().catch(err => console.log("Critical Error:", err));
+
 
 
 
