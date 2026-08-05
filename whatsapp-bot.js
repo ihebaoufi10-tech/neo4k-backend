@@ -7,13 +7,16 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay, f
 const pino = require("pino");
 const qrcode = require("qrcode-terminal");
 const { Boom } = require("@hapi/boom");
+const fs = require('fs');
 
 async function connectToWhatsApp() {
-    // استخدام اسم مجلد جديد كلياً لمسح أي محاولات فاشلة
-    const { state, saveCreds } = await useMultiFileAuthState('session_fast_connect');
+    const sessionDir = 'session_ultimate_v5';
+    
+    // إذا حدث خطأ 401 سابقاً، قد نحتاج لمسح المجلد يدوياً (هذا الكود يحاول البدء من جديد)
+    const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
     const { version } = await fetchLatestBaileysVersion();
 
-    console.log("Fast Connect Starting...");
+    console.log("Initializing Stable Connection...");
 
     const sock = makeWASocket({
         version,
@@ -21,12 +24,11 @@ async function connectToWhatsApp() {
         auth: state,
         printQRInTerminal: true,
         browser: ["Windows", "Chrome", "110.0.0.0"],
-        // إعدادات السرعة القصوى
-        connectTimeoutMs: 120000, // زيادة الوقت لـ 120 ثانية
+        connectTimeoutMs: 120000,
         defaultQueryTimeoutMs: 0,
-        syncFullHistory: false, // لا نريد أي رسائل قديمة
-        linkPreview: false, // لا نريد معاينة الروابط
-        getMessage: async (key) => { return { conversation: 'Welcome' } }
+        syncFullHistory: false,
+        // منع تحميل الوسائط لتقليل استهلاك الرام
+        shouldSyncHistoryMessage: () => false
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -38,17 +40,22 @@ async function connectToWhatsApp() {
         
         if (qr && !codeSent) {
             codeSent = true;
-            // تقليل وقت الانتظار لـ 10 ثواني فقط لربح الوقت
-            await delay(10000); 
+            console.log("=== CONNECTION STABLE - PREPARING CODE ===");
+            
+            // انتظار 20 ثانية لضمان أن السيرفر استقر تماماً
+            await delay(20000); 
+            
             const phoneNumber = process.env.PHONE_NUMBER;
             if (phoneNumber) {
                 try {
-                    console.log("REQUESTING CODE NOW...");
+                    console.log("ACTION: REQUESTING CODE FOR " + phoneNumber);
                     const code = await sock.requestPairingCode(phoneNumber.replace('+', '').trim());
                     console.log("*********************************");
-                    console.log("YOUR CODE IS:", code);
+                    console.log("YOUR FINAL CODE IS: " + code);
                     console.log("*********************************");
+                    console.log("PLEASE ENTER IT NOW ON YOUR PHONE!");
                 } catch (e) {
+                    console.log("Pairing Error: " + e.message);
                     codeSent = false;
                 }
             }
@@ -57,18 +64,23 @@ async function connectToWhatsApp() {
         if (connection === 'close') {
             const error = lastDisconnect?.error;
             const statusCode = error instanceof Boom ? error.output.statusCode : null;
-            console.log('Closed. Status:', statusCode);
-            if (statusCode !== DisconnectReason.loggedOut) {
-                setTimeout(() => connectToWhatsApp(), 10000);
-            }
+            
+            console.log('Connection closed. Status:', statusCode);
+            
+            // إذا كان الخطأ 401 أو 408، سننتظر دقيقة كاملة ليرتاح الواتساب
+            const delayTime = (statusCode === 401 || statusCode === 408) ? 60000 : 20000;
+            console.log(`Waiting ${delayTime/1000}s before next attempt...`);
+            
+            setTimeout(() => connectToWhatsApp(), delayTime);
         } else if (connection === 'open') {
-            console.log("SUCCESS: WHATSAPP CONNECTED!");
+            console.log("SUCCESS: WHATSAPP IS NOW LIVE!");
             codeSent = false;
         }
     });
 }
 
-connectToWhatsApp().catch(err => console.log("Error:", err));
+connectToWhatsApp().catch(err => console.log("Fatal:", err));
+
 
 
 
