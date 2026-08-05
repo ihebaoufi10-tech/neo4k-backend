@@ -55,12 +55,72 @@ app.get("/admin-check-orders-secret-99", (req, res) => {
     if (!fs.existsSync(LOG_FILE)) return res.send("<h1>Aucune commande pour le moment.</h1>");
     let orders = [];
     try { orders = JSON.parse(fs.readFileSync(LOG_FILE)); } catch (e) { return res.send("<h1>Erreur</h1>"); }
-    let html = "<h1>Liste des Commandes et Tests</h1><table border='1'><tr><th>Date</th><th>Type</th><th>Email / Détails</th></tr>";
+    
+    let html = `
+    <!DOCTYPE html>
+    <html lang="fr">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Admin - Neo4K Pro</title>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Unbounded:wght@700&display=swap" rel="stylesheet">
+        <style>
+            :root { --bg: #0A0D13; --surface: #121828; --border: #242C42; --text: #E9EDF5; --text-dim: #8C97AE; --cyan: #2DD4A7; }
+            body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; margin: 0; padding: 20px; }
+            .container { max-width: 900px; margin: 0 auto; }
+            h1 { font-family: 'Unbounded'; font-size: 24px; color: var(--cyan); margin-bottom: 30px; text-align: center; }
+            .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+            table { width: 100%; border-collapse: collapse; text-align: left; }
+            th { background: rgba(255,255,255,0.05); padding: 15px; font-size: 13px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
+            td { padding: 15px; border-top: 1px solid var(--border); font-size: 14px; }
+            tr:hover { background: rgba(45, 212, 167, 0.03); }
+            .badge { padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 800; }
+            .badge-paid { background: rgba(45, 212, 167, 0.1); color: var(--cyan); }
+            .badge-test { background: rgba(255, 184, 77, 0.1); color: #FFB84D; }
+            .email { font-weight: 600; color: #fff; }
+            .date { color: var(--text-dim); font-family: monospace; }
+            @media (max-width: 600px) { 
+                th:nth-child(1), td:nth-child(1) { display: none; }
+                td { padding: 12px; }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>Neo4K Pro - Admin</h1>
+            <div class="card">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Type</th>
+                            <th>Email / Détails</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+    `;
+    
     orders.forEach(o => {
-        const details = o.plan ? `${o.email} (Plan: ${o.plan})` : o.email;
-        html += `<tr><td>${o.date}</td><td>${o.type}</td><td>${details}</td></tr>`;
+        const typeClass = o.type.includes('PAIEMENT') ? 'badge-paid' : 'badge-test';
+        const details = o.plan ? `<span class="email">${o.email}</span> <br><small style="color:var(--cyan)">Plan: ${o.plan}</small>` : `<span class="email">${o.email}</span>`;
+        html += `
+            <tr>
+                <td class="date">${o.date}</td>
+                <td><span class="badge ${typeClass}">${o.type}</span></td>
+                <td>${details}</td>
+            </tr>
+        `;
     });
-    html += "</table>";
+    
+    html += `
+                    </tbody>
+                </table>
+            </div>
+            <p style="text-align:center; margin-top:30px; color:var(--text-dim); font-size:12px;">Dernière mise à jour: ${new Date().toLocaleTimeString('fr-FR')}</p>
+        </div>
+    </body>
+    </html>
+    `;
     res.send(html);
 });
 
