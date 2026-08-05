@@ -1,68 +1,55 @@
-const { Client, LocalAuth } = require("whatsapp-web.js");
+const { default: makeWASocket, useMultiFileAuthState, delay, fetchLatestBaileysVersion } = require("@whiskeysockets/baileys");
+const pino = require("pino");
 const qrcode = require("qrcode-terminal");
 
-const client = new Client({
-    authStrategy: new LocalAuth(),
-    puppeteer: {
-        headless: true,
-        executablePath: '/usr/bin/google-chrome-stable',
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-gpu',
-            '--no-zygote',
-            '--disable-extensions',
-            '--disable-component-update',
-            '--disable-features=IsolateOrigins,site-per-process',
-            '--disable-web-security',
-            '--font-render-hinting=none',
-            '--disable-setuid-sandbox',
-            '--disable-render-process-edge-worker',
-            '--disable-oopr-debug-crash-dump',
-            '--no-crash-upload',
-            '--disable-low-res-tiling',
-            '--disable-smooth-scrolling',
-            '--disable-default-apps',
-            '--mute-audio',
-            '--hide-scrollbars'
-        ],
-    },
-});
+async function connectToWhatsApp() {
+    // حفظ الجلسة في مجلد لكي لا يطلب الكود كل مرة
+    const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
+    const { version } = await fetchLatestBaileysVersion();
 
-client.on('qr', async (qr) => {
-    console.log("QR RECEIVED - Generating Pairing Code...");
-    qrcode.generate(qr, { small: true });
+    const sock = makeWASocket({
+        version,
+        logger: pino({ level: 'silent' }),
+        auth: state,
+        printQRInTerminal: true,
+        browser: ["NEO 4K PRO", "Chrome", "1.0.0"]
+    });
 
-    const phoneNumber = process.env.PHONE_NUMBER;
-    if (phoneNumber) {
-        console.log("Requesting Pairing Code for:", phoneNumber);
-        try {
-            // انتظار بسيط قبل الطلب لراحة السيرفر
-            await new Promise(resolve => setTimeout(resolve, 15000));
-            const code = await client.requestPairingCode(phoneNumber);
-            console.log("*********************************");
-            console.log("YOUR WHATSAPP CODE IS:", code);
-            console.log("*********************************");
-        } catch (err) {
-            console.log("Could not get code, scan QR instead:", err.message);
+    sock.ev.on('creds.update', saveCreds);
+
+    sock.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect, qr } = update;
+        
+        if (qr) {
+            console.log("==========================================");
+            console.log("SCAN THIS QR OR USE PAIRING CODE:");
+            qrcode.generate(qr, { small: true });
+            console.log("==========================================");
+            
+            const phoneNumber = process.env.PHONE_NUMBER;
+            if (phoneNumber) {
+                try {
+                    await delay(5000);
+                    const code = await sock.requestPairingCode(phoneNumber.replace('+', ''));
+                    console.log("*********************************");
+                    console.log("NEW WHATSAPP CODE IS:", code);
+                    console.log("*********************************");
+                } catch (e) {
+                    console.log("Waiting for WhatsApp to allow new code...");
+                }
+            }
         }
-    }
-});
 
-client.on('ready', () => {
-    console.log('CLIENT IS READY');
-});
+        if (connection === 'close') {
+            console.log("Connection closed, reconnecting...");
+            connectToWhatsApp();
+        } else if (connection === 'open') {
+            console.log("SUCCESS: WHATSAPP CONNECTED!");
+        }
+    });
+}
 
-client.on('auth_failure', msg => {
-    console.error('AUTHENTICATION FAILURE', msg);
-});
-
-client.initialize().catch(err => {
-    console.error("INITIALIZATION ERROR:", err.message);
-    // إعادة محاولة ذكية بعد 20 ثانية
-    setTimeout(() => client.initialize(), 20000);
-});
+connectToWhatsApp();
 
 
 
