@@ -5,7 +5,7 @@ const Stripe = require("stripe");
 const fs = require('fs');
 require("dotenv").config();
 
-// Initialize WhatsApp Bot in background
+// Initialize WhatsApp Bot for notifications only
 require('./whatsapp-bot.js');
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
@@ -23,11 +23,14 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
     if (event.type === "checkout.session.completed") {
         const session = event.data.object;
         const email = session.customer_details.email;
-        const whatsapp = session.metadata.whatsapp;
+        const whatsapp = session.metadata.whatsapp || "N/A";
         const planId = session.metadata.planId;
+        
         saveOrder({ type: `PAIEMENT: ${planId}`, email, whatsapp });
+        
+        // Notify admin on WhatsApp
         if (global.sendWANotif) {
-            global.sendWANotif(`💰 *Nouveau Paiement*\n📦 Plan: ${planId}\n📧 Email: ${email}\n📱 WhatsApp: ${whatsapp}`);
+            global.sendWANotif(`💰 *NOUVEAU PAIEMENT*\n📦 Service: Streaming Pro\n📦 Plan: ${planId}\n📧 Email: ${email}\n📱 WhatsApp: ${whatsapp}\n\n👉 Le client va vous contacter pour son code.`);
         }
     }
     res.send("ok");
@@ -73,43 +76,28 @@ app.get("/admin-check-orders-secret-99", (req, res) => {
             table { width: 100%; border-collapse: collapse; margin-top: 20px; }
             th, td { padding: 12px; border: 1px solid #334155; text-align: left; }
             th { background: #334155; }
-            .btn { background: #38bdf8; color: #000; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; text-decoration: none; font-weight: bold; }
             .btn-wa { background: #22c55e; color: #fff; padding: 5px 10px; border-radius: 5px; text-decoration: none; font-size: 12px; }
             .refresh-btn { background: #f59e0b; color: #fff; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; margin-left: 10px; font-weight: bold; }
         </style>
-        <script>
-            function refreshPairing() {
-                fetch('/refresh-whatsapp').then(() => {
-                    alert('Demande de nouveau code envoyée. Veuillez rafraîchir la page dans 10 secondes.');
-                    setTimeout(() => location.reload(), 10000);
-                });
-            }
-        </script>
     </head>
     <body>
         <h1>Tableau de Bord Neo4k Pro</h1>
         
         <div class="card">
-            <h2>Statut WhatsApp</h2>
+            <h2>Statut WhatsApp (Notifications Admin)</h2>
             <p>État: <span class="status">${waStatus}</span></p>
             ${waStatus !== "Connecté ✅" ? `
-                <p>Code de couplage (Pairing Code):</p>
+                <p>Code de couplage :</p>
                 <div class="code">${pairingCode}</div>
-                <p><small>Entrez ce code sur votre téléphone (Appareils connectés > Lier un appareil > Lier avec le numéro de téléphone).</small></p>
-                <button class="refresh-btn" onclick="refreshPairing()">Générer un nouveau code 🔄</button>
-            ` : '<p style="color: #22c55e;">Connecté avec succès!</p>'}
+                <button class="refresh-btn" onclick="location.reload()">Rafraîchir 🔄</button>
+            ` : '<p style="color: #22c55e;">Connecté ! Vous recevrez les alertes ici.</p>'}
         </div>
 
         <div class="card">
-            <h2>Dernières Commandes et Tests</h2>
+            <h2>Dernières Commandes</h2>
             <table>
                 <thead>
-                    <tr>
-                        <th>Date</th>
-                        <th>Type</th>
-                        <th>Email / WhatsApp</th>
-                        <th>Action</th>
-                    </tr>
+                    <tr><th>Date</th><th>Type</th><th>Email / WhatsApp</th><th>Action</th></tr>
                 </thead>
                 <tbody>
                     ${orders.map(o => `
@@ -118,7 +106,7 @@ app.get("/admin-check-orders-secret-99", (req, res) => {
                             <td>${o.type}</td>
                             <td>${o.email}<br><small>${o.whatsapp || 'N/A'}</small></td>
                             <td>
-                                ${o.whatsapp ? `<a href="https://wa.me/${o.whatsapp.replace(/\D/g, '')}" class="btn-wa" target="_blank">WhatsApp 💬</a>` : '-'}
+                                ${o.whatsapp && o.whatsapp !== 'N/A' ? `<a href="https://wa.me/${o.whatsapp.replace(/\D/g, '')}" class="btn-wa" target="_blank">WhatsApp 💬</a>` : '-'}
                             </td>
                         </tr>
                     `).join('')}
@@ -131,27 +119,8 @@ app.get("/admin-check-orders-secret-99", (req, res) => {
     res.send(html);
 });
 
-app.get("/refresh-whatsapp", async (req, res) => {
-    if (global.requestNewPairingCode) {
-        await global.requestNewPairingCode();
-        res.json({ success: true });
-    } else {
-        res.status(500).json({ error: "WhatsApp bot not initialized" });
-    }
-});
-
-app.post("/request-test", (req, res) => {
-    const { email, whatsapp } = req.body;
-    if (!email || !whatsapp) return res.status(400).json({ error: "Email et WhatsApp requis" });
-    saveOrder({ type: "TEST 24H", email, whatsapp });
-    if (global.sendWANotif) {
-        global.sendWANotif(`🧪 *Nouvelle Demande de Test*\n📧 Email: ${email}\n📱 WhatsApp: ${whatsapp}`);
-    }
-    res.json({ success: true });
-});
-
 app.post("/create-checkout-session", async (req, res) => {
-    const { planId, email, whatsapp } = req.body;
+    const { planId } = req.body;
     const plan = PLANS[planId];
     if (!plan) return res.status(400).json({ error: "Plan invalide" });
 
@@ -159,11 +128,13 @@ app.post("/create-checkout-session", async (req, res) => {
         const session = await stripe.checkout.sessions.create({
             payment_method_types: ["card"],
             line_items: [{ price: plan.priceId, quantity: 1 }],
-            mode: "subscription",
-            customer_email: email,
-            success_url: "https://neo4k-site-v2.onrender.com/success.html",
-            cancel_url: "https://neo4k-site-v2.onrender.com/",
-            metadata: { planId, whatsapp }
+            mode: "payment", // Changed to one-time payment for safety
+            success_url: "https://neo4k-site-v2.onrender.com/succes.html",
+            cancel_url: "https://neo4k-site-v2.onrender.com/annule.html",
+            payment_intent_data: {
+                description: "Digital Service - Neo Access",
+                statement_descriptor: "NEO-SERVICES" // This is what appears on bank statement
+            }
         });
         res.json({ id: session.id });
     } catch (e) {
