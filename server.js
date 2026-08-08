@@ -36,9 +36,11 @@ function saveOrder(order) {
 
 // Function to send email notification to admin
 async function sendAdminEmail(details) {
+    const adminEmail = "ihebaoufi10@gmail.com"; // Your correct email address
+    
     const msg = {
-        to: 'bushidozoldyck108@gmail.com', // Your email
-        from: 'noreply@neo-services.pro', // Must be a verified sender in SendGrid
+        to: adminEmail,
+        from: 'noreply@neo-services.pro', // Must be verified in SendGrid
         subject: '💰 NOUVELLE VENTE - Neo 4K Pro',
         html: `
             <div style="font-family: sans-serif; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
@@ -54,7 +56,7 @@ async function sendAdminEmail(details) {
     };
     try {
         await sgMail.send(msg);
-        console.log("Admin email notification sent.");
+        console.log("Admin email notification sent to " + adminEmail);
     } catch (error) {
         console.error("SendGrid Error:", error.response ? error.response.body : error.message);
     }
@@ -154,10 +156,10 @@ app.post("/webhook", express.raw({ type: 'application/json' }), async (req, res)
 
         saveOrder(details);
         
-        // 1. Send Email Notification (SendGrid)
+        // 1. Send Email Notification
         await sendAdminEmail(details);
 
-        // 2. Send WhatsApp Notification (If bot is online)
+        // 2. Send WhatsApp Notification
         if (global.sendWANotif) {
             global.sendWANotif(`💰 *NOUVELLE VENTE*\nPlan: ${details.plan}\nEmail: ${details.email}\nRef: ${details.ref}`);
         }
