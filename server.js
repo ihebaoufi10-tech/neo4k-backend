@@ -8,20 +8,29 @@ const app = express();
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 app.use(cors());
 
+// --- التقنية الاحترافية لقراءة البيانات الخام ---
+app.use(express.json({
+    verify: (req, res, buf) => {
+        if (req.originalUrl.startsWith('/webhook')) {
+            req.rawBody = buf;
+        }
+    }
+}));
+
 // Initialize WhatsApp Bot
 require('./whatsapp-bot.js');
 
 const DATA_FILE = 'orders.json';
 if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, JSON.stringify([]));
 
-// --- WEBHOOK STRIPE (المصلح) ---
-app.post("/webhook", express.raw({type: 'application/json'}), async (req, res) => {
+// --- WEBHOOK STRIPE (النسخة النهائية) ---
+app.post("/webhook", async (req, res) => {
     const sig = req.headers['stripe-signature'];
     let event;
 
     try {
-        // نستخدم req.body مباشرة كـ Buffer
-        event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+        // نستخدم req.rawBody الذي تم حفظه بالأعلى
+        event = stripe.webhooks.constructEvent(req.rawBody, sig, process.env.STRIPE_WEBHOOK_SECRET.trim());
     } catch (err) {
         console.log("❌ Webhook Error:", err.message);
         return res.status(400).send("Webhook Error: " + err.message);
@@ -42,14 +51,14 @@ app.post("/webhook", express.raw({type: 'application/json'}), async (req, res) =
         fs.writeFileSync(DATA_FILE, JSON.stringify(orders.slice(0, 100)));
 
         // إرسال إيميل
-        const msg = {
-            to: "ihebaoufi10@gmail.com",
-            from: 'ihebaoufi10@gmail.com',
-            subject: '💰 NOUVELLE VENTE - Neo 4K Pro',
-            text: `Nouvelle vente! Client: <LaTex>{details.email}, Plan:</LaTex>{details.plan}`,
-            html: `<h3>Nouvelle Vente!</h3><p>Client: <LaTex>{details.email}</p><p>Plan:</LaTex>{details.plan}</p>`
-        };
-        try { await sgMail.send(msg); } catch(e) {}
+        try {
+            await sgMail.send({
+                to: "ihebaoufi10@gmail.com",
+                from: 'ihebaoufi10@gmail.com',
+                subject: '💰 NOUVELLE VENTE - Neo 4K Pro',
+                html: `<h3>Nouvelle Vente!</h3><p>Client: <LaTex>{details.email}</p><p>Plan:</LaTex>{details.plan}</p>`
+            });
+        } catch(e) { console.log("Email Error"); }
 
         // إرسال واتساب
         if (global.sendWANotif) {
@@ -58,9 +67,6 @@ app.post("/webhook", express.raw({type: 'application/json'}), async (req, res) =
     }
     res.send({received: true});
 });
-
-// باقي المسارات تأتي بعد الويب هوك
-app.use(express.json());
 
 app.post("/create-checkout-session", async (req, res) => {
     const { planId } = req.body;
@@ -84,4 +90,5 @@ app.post("/create-checkout-session", async (req, res) => {
 });
 
 app.listen(process.env.PORT || 3000, () => console.log("Server Live!"));
+
 
