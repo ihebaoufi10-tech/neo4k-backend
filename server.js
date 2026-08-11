@@ -8,66 +8,87 @@ const app = express();
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 app.use(cors());
 
+// معالجة بيانات Stripe Webhook
 app.use(express.json({
     verify: function(req, res, buf) {
         if (req.originalUrl === '/webhook') { req.rawBody = buf; }
     }
 }));
 
-require('./whatsapp-bot.js');
+const DATA_FILE = 'orders.json';
+if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, JSON.stringify([]));
 
+// وظيفة لإرسال إيميل تنبيه لك
+async function notifyAdmin(details) {
+    const msg = {
+        to: 'ihebaoufi10@gmail.com',
+        from: 'ihebaoufi10@gmail.com',
+        subject: '💰 NOUVELLE VENTE - Neo 4K Pro',
+        html: `
+            <div style="font-family:sans-serif; border:1px solid #eee; padding:20px;">
+                <h2 style="color:#22c55e;">Nouvelle vente réussie !</h2>
+                <p><strong>Email du client:</strong> <LaTex>{details.email}</p>                 <p><strong>Plan choisi:</strong></LaTex>{details.plan}</p>
+                <p><strong>ID Transaction:</strong> ${details.ref}</p>
+                <hr>
+                <p>Vous pouvez اآن إرسال الكود للزبون عبر إيميله أو انتظاره ليراسلكم عبر واتساب.</p>
+            </div>
+        `
+    };
+    try { await sgMail.send(msg); } catch (e) { console.log("Email Error"); }
+}
+
+// رابط الويب هوك (هذا هو المحرك الأساسي)
 app.post('/webhook', async function(req, res) {
     const sig = req.headers['stripe-signature'];
     let event;
     try {
         event = stripe.webhooks.constructEvent(req.rawBody, sig, process.env.STRIPE_WEBHOOK_SECRET.trim());
-    } catch (err) { return res.status(400).send('Error'); }
+    } catch (err) { return res.status(400).send('Webhook Error'); }
     
     res.json({received: true});
 
     if (event.type === 'checkout.session.completed') {
         const session = event.data.object;
-        const email = session.customer_details.email;
-        const plan = session.metadata.planId || 'Neo4k';
-        
-        if (global.sendWANotif) {
-            global.sendWANotif('💰 VENTE REUSSIE\nEmail: ' + email + '\nPlan: ' + plan);
-        }
-        
-        sgMail.send({
-            to: 'ihebaoufi10@gmail.com',
-            from: 'ihebaoufi10@gmail.com',
-            subject: '💰 VENTE Neo 4K Pro',
-            text: 'Nouvelle vente: ' + email
-        }).catch(function(e) { console.log('Mail Error'); });
+        const details = {
+            email: session.customer_details.email,
+            plan: session.metadata.planId || 'Abonnement',
+            ref: session.id,
+            date: new Date().toLocaleString()
+        };
+
+        // حفظ الطلب في الملف
+        let orders = JSON.parse(fs.readFileSync(DATA_FILE));
+        orders.unshift(details);
+        fs.writeFileSync(DATA_FILE, JSON.stringify(orders.slice(0, 100)));
+
+        // إرسال الإيميل لك فوراً
+        await notifyAdmin(details);
     }
 });
 
 app.use(express.json());
 
+// لوحة تحكم بسيطة لرؤية المبيعات
 app.get('/admin', function(req, res) {
-    var code = global.waPairingCode || '---';
-    var status = global.waStatus || 'Initialisation...';
-    
-    res.send('<body style="background:#0f172a;color:white;text-align:center;padding:50px;font-family:sans-serif;">' +
-        '<h1>🛡️ Neo4k Admin</h1>' +
-        '<div style="background:#1e293b;padding:20px;border-radius:15px;display:inline-block;min-width:300px;border:2px solid #38bdf8;">' +
-        '<h3>Status: <span style="color:#22c55e;">' + status + '</span></h3>' +
-        '<h2 style="color:#38bdf8;letter-spacing:5px;font-size:35px;background:black;padding:15px;border-radius:10px;">' + code + '</h2>' +
-        '<button onclick="location.reload()" style="padding:15px 30px;cursor:pointer;font-weight:bold;border-radius:10px;border:none;background:#38bdf8;color:white;">🔄 ACTUALISER</button>' +
-        '<br><br><a href="/admin-test-email" style="color:#38bdf8;text-decoration:none;">📧 Tester Email</a>' +
-        '</div></body>');
+    let orders = JSON.parse(fs.readFileSync(DATA_FILE));
+    let html = '<body style="background:#0f172a;color:white;font-family:sans-serif;padding:20px;">';
+    html += '<h1>💰 Liste des Ventes</h1>';
+    html += '<table border="1" style="width:100%;border-collapse:collapse;text-align:left;">';
+    html += '<tr style="background:#1e293b;"><th>Date</th><th>Email Client</th><th>Plan</th></tr>';
+    orders.forEach(o => {
+        html += `<tr><td>${o.date}</td><td><LaTex>{o.email}</td><td></LaTex>{o.plan}</td></tr>`;
+    });
+    html += '</table><br><a href="/admin-test-email" style="color:#38bdf8;">📧 Tester l\'envoi d\'email</a></body>';
+    res.send(html);
 });
 
 app.get('/admin-test-email', async function(req, res) {
-    try {
-        await sgMail.send({ to: 'ihebaoufi10@gmail.com', from: 'ihebaoufi10@gmail.com', subject: 'Test Email', text: 'OK' });
-        res.send('✅ Email envoyé ! <a href="/admin">Retour</a>');
-    } catch (e) { res.send('❌ Erreur: ' + e.message); }
+    await notifyAdmin({ email: 'TEST@GMAIL.COM', plan: 'TEST_PLAN', ref: 'TEST_REF' });
+    res.send('✅ Email de test envoyé à ihebaoufi10@gmail.com ! <a href="/admin">Retour</a>');
 });
 
 app.post('/create-checkout-session', async function(req, res) {
-    const planId = req.body.planId;
+    const { planId } = req.body;
     const PLANS = { '1mois': process.env.STRIPE_PRICE_1MOIS, '3mois': process.env.STRIPE_PRICE_3MOIS, '6mois': process.env.STRIPE_PRICE_6MOIS, '12mois': process.env.STRIPE_PRICE_12MOIS };
     try {
         const session = await stripe.checkout.sessions.create({
@@ -83,6 +104,7 @@ app.post('/create-checkout-session', async function(req, res) {
 });
 
 app.listen(process.env.PORT || 3000);
+
 
 
 
