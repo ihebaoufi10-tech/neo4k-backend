@@ -9,7 +9,6 @@ const app = express();
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 app.use(cors());
-app.use(express.json());
 
 // Initialize WhatsApp Bot
 require('./whatsapp-bot.js');
@@ -36,11 +35,11 @@ function saveOrder(order) {
 
 // Function to send email notification to admin
 async function sendAdminEmail(details) {
-    const adminEmail = "ihebaoufi10@gmail.com"; // Your correct email address
+    const adminEmail = "ihebaoufi10@gmail.com"; 
     
     const msg = {
         to: adminEmail,
-        from: 'noreply@neo-services.pro', // Must be verified in SendGrid
+        from: 'ihebaoufi10@gmail.com',
         subject: '💰 NOUVELLE VENTE - Neo 4K Pro',
         html: `
             <div style="font-family: sans-serif; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
@@ -61,6 +60,38 @@ async function sendAdminEmail(details) {
         console.error("SendGrid Error:", error.response ? error.response.body : error.message);
     }
 }
+
+// --- IMPORTANT: STRIPE WEBHOOK MUST BE BEFORE express.json() ---
+app.post("/webhook", express.raw({ type: 'application/json' }), async (req, res) => {
+    const sig = req.headers['stripe-signature'];
+    let event;
+    try {
+        event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+    } catch (err) { 
+        console.error(`Webhook Error: ${err.message}`);
+        return res.status(400).send(`Webhook Error: ${err.message}`); 
+    }
+
+    if (event.type === 'checkout.session.completed') {
+        const session = event.data.object;
+        const details = {
+            email: session.customer_details.email,
+            plan: session.metadata.planId,
+            ref: session.id
+        };
+
+        saveOrder(details);
+        await sendAdminEmail(details);
+
+        if (global.sendWANotif) {
+            global.sendWANotif(`💰 *NOUVELLE VENTE*\nPlan: ${details.plan}\nEmail: ${details.email}\nRef: ${details.ref}`);
+        }
+    }
+    res.send("ok");
+});
+// -------------------------------------------------------------
+
+app.use(express.json());
 
 // Admin dashboard route
 app.get("/admin-check-orders-secret-99", (req, res) => {
@@ -136,35 +167,6 @@ app.post("/create-checkout-session", async (req, res) => {
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
-});
-
-// Webhook
-app.post("/webhook", express.raw({ type: 'application/json' }), async (req, res) => {
-    const sig = req.headers['stripe-signature'];
-    let event;
-    try {
-        event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
-    } catch (err) { return res.status(400).send(`Webhook Error: ${err.message}`); }
-
-    if (event.type === 'checkout.session.completed') {
-        const session = event.data.object;
-        const details = {
-            email: session.customer_details.email,
-            plan: session.metadata.planId,
-            ref: session.id
-        };
-
-        saveOrder(details);
-        
-        // 1. Send Email Notification
-        await sendAdminEmail(details);
-
-        // 2. Send WhatsApp Notification
-        if (global.sendWANotif) {
-            global.sendWANotif(`💰 *NOUVELLE VENTE*\nPlan: ${details.plan}\nEmail: ${details.email}\nRef: ${details.ref}`);
-        }
-    }
-    res.send("ok");
 });
 
 const PORT = process.env.PORT || 3000;
