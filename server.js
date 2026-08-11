@@ -8,34 +8,36 @@ const app = express();
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 app.use(cors());
 
-// --- التقنية الاحترافية لقراءة البيانات الخام ---
+// --- معالجة البيانات الخام للويب هوك ---
 app.use(express.json({
     verify: (req, res, buf) => {
-        if (req.originalUrl.startsWith('/webhook')) {
+        if (req.originalUrl === '/webhook') {
             req.rawBody = buf;
         }
     }
 }));
 
-// Initialize WhatsApp Bot
 require('./whatsapp-bot.js');
 
 const DATA_FILE = 'orders.json';
 if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, JSON.stringify([]));
 
-// --- WEBHOOK STRIPE (النسخة النهائية) ---
 app.post("/webhook", async (req, res) => {
     const sig = req.headers['stripe-signature'];
     let event;
 
     try {
-        // نستخدم req.rawBody الذي تم حفظه بالأعلى
+        if (!req.rawBody) throw new Error("No raw body");
         event = stripe.webhooks.constructEvent(req.rawBody, sig, process.env.STRIPE_WEBHOOK_SECRET.trim());
     } catch (err) {
-        console.log("❌ Webhook Error:", err.message);
-        return res.status(400).send("Webhook Error: " + err.message);
+        console.error("❌ Webhook Error:", err.message);
+        return res.status(400).send("Webhook Error");
     }
 
+    // الرد فوراً على Stripe لتجنب الـ Timeout
+    res.json({received: true});
+
+    // تنفيذ الإشعارات في الخلفية
     if (event.type === 'checkout.session.completed') {
         const session = event.data.object;
         const details = {
@@ -45,28 +47,27 @@ app.post("/webhook", async (req, res) => {
         };
 
         // حفظ الطلب
-        let orders = [];
-        try { orders = JSON.parse(fs.readFileSync(DATA_FILE)); } catch(e) {}
-        orders.unshift({ date: new Date().toLocaleString(), ...details });
-        fs.writeFileSync(DATA_FILE, JSON.stringify(orders.slice(0, 100)));
-
-        // إرسال إيميل
         try {
-            await sgMail.send({
-                to: "ihebaoufi10@gmail.com",
-                from: 'ihebaoufi10@gmail.com',
-                subject: '💰 NOUVELLE VENTE - Neo 4K Pro',
-                html: `<h3>Nouvelle Vente!</h3><p>Client: <LaTex>{details.email}</p><p>Plan:</LaTex>{details.plan}</p>`
-            });
-        } catch(e) { console.log("Email Error"); }
+            let orders = JSON.parse(fs.readFileSync(DATA_FILE));
+            orders.unshift({ date: new Date().toLocaleString(), ...details });
+            fs.writeFileSync(DATA_FILE, JSON.stringify(orders.slice(0, 100)));
+        } catch(e) {}
 
-        // إرسال واتساب
+        // إرسال الإشعارات (بدون await لسرعة التنفيذ)
+        sgMail.send({
+            to: "ihebaoufi10@gmail.com",
+            from: 'ihebaoufi10@gmail.com',
+            subject: '💰 NOUVELLE VENTE - Neo 4K Pro',
+            html: `<h3>Nouvelle Vente!</h3><p>Client: <LaTex>{details.email}</p><p>Plan:</LaTex>{details.plan}</p>`
+        }).catch(e => console.error("Email error"));
+
         if (global.sendWANotif) {
             global.sendWANotif(`💰 *NOUVELLE VENTE*\nPlan: <LaTex>{details.plan}\nEmail:</LaTex>{details.email}`);
         }
     }
-    res.send({received: true});
 });
+
+app.use(express.json());
 
 app.post("/create-checkout-session", async (req, res) => {
     const { planId } = req.body;
@@ -90,5 +91,6 @@ app.post("/create-checkout-session", async (req, res) => {
 });
 
 app.listen(process.env.PORT || 3000, () => console.log("Server Live!"));
+
 
 
