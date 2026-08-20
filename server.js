@@ -55,10 +55,10 @@ async function sendAdminEmail(details) {
                     <tr><td style="padding: 8px; color: #aaa;">Montant :</td><td style="padding: 8px; font-weight: bold; color: #FACC15;">${details.amount || ''}</td></tr>
                     <tr><td style="padding: 8px; color: #aaa;">Email Client :</td><td style="padding: 8px; color: #fff;">${details.email}</td></tr>
                     <tr><td style="padding: 8px; color: #aaa;">WhatsApp Client :</td><td style="padding: 8px; color: #fff;">${details.whatsapp || 'Non fourni'}</td></tr>
-                    <tr><td style="padding: 8px; color: #aaa;">R\u00E9f\u00E9rence :</td><td style="padding: 8px; font-family: monospace; color: #fff;">${details.ref || '-'}</td></tr>
+                    <tr><td style="padding: 8px; color: #aaa;">Référence :</td><td style="padding: 8px; font-family: monospace; color: #fff;">${details.ref || '-'}</td></tr>
                 </table>
                 <hr style="border: 0; border-top: 1px solid #333; margin: 15px 0;">
-                <p style="color: #888;">Le client a \u00E9t\u00E9 redirig\u00E9 vers WhatsApp avec les instructions de paiement.<br>Veuillez v\u00E9rifier la r\u00E9ception du virement bancaire puis envoyer le code d'acc\u00E8s.</p>
+                <p style="color: #888;">Le client a été redirigé vers WhatsApp avec les instructions de paiement.<br>Veuillez vérifier la réception du virement bancaire puis envoyer le code d'accès.</p>
             </div>
         `,
     };
@@ -166,7 +166,7 @@ app.get("/admin-check-orders-secret-99", (req, res) => {
         <h1>📊 Admin Dashboard - Neo4k Pro</h1>
         <p>Total commandes: ${orders.length}</p>
         <table>
-            <tr><th>Date</th><th>Type</th><th>Plan</th><th>Montant</th><th>Email</th><th>WhatsApp</th><th>Statut</th><th>R\u00E9f\u00E9rence</th></tr>
+            <tr><th>Date</th><th>Type</th><th>Plan</th><th>Montant</th><th>Email</th><th>WhatsApp</th><th>Statut</th><th>Référence</th></tr>
             ${orders.map(o => `<tr>
                 <td>${o.date || '-'}</td>
                 <td><span class="badge ${o.type === 'PAIEMENT' ? 'badge-payment' : 'badge-trial'}">${o.type || '-'}</span></td>
