@@ -1,27 +1,31 @@
 const express = require('express');
 const cors = require('cors');
-const axios = require('axios');
+const https = require('https');
 const sgMail = require('@sendgrid/mail');
 const fs = require('fs');
 const path = require('path');
 
 const app = express();
 
+// Middleware
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
 // Configuration SendGrid
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
-// PayPal Configuration
-const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID;
-const PAYPAL_SECRET = process.env.PAYPAL_SECRET;
-const PAYPAL_BASE_URL = process.env.NODE_ENV === 'production'
-    ? 'https://api-m.paypal.com'
-    : 'https://api-m.sandbox.paypal.com';
+// IBAN Payment Configuration
+const IBAN = "GB11CLRB04281270826442";
+const BANK_NAME = "Trade Republic (NSave)";
+const BENEFICIARY = "Iheb Aoufi";
+const WHATSAPP_NUMBER = "213564653328";
 
 const PLANS = {
-    "1mois": { name: "Plan 1 Mois", price: { value: "10.00", currency_code: "EUR" }, description: "Abonnement Neo4K Pro - 1 Mois" },
-    "3mois": { name: "Plan 3 Mois", price: { value: "20.00", currency_code: "EUR" }, description: "Abonnement Neo4K Pro - 3 Mois" },
-    "6mois": { name: "Plan 6 Mois", price: { value: "30.00", currency_code: "EUR" }, description: "Abonnement Neo4K Pro - 6 Mois" },
-    "12mois": { name: "Plan 12 Mois", price: { value: "45.00", currency_code: "EUR" }, description: "Abonnement Neo4K Pro - 12 Mois" },
+    "1mois": { name: "Plan 1 Mois", price: "10", currency: "EUR", description: "Abonnement Neo4K Pro - 1 Mois" },
+    "3mois": { name: "Plan 3 Mois", price: "20", currency: "EUR", description: "Abonnement Neo4K Pro - 3 Mois" },
+    "6mois": { name: "Plan 6 Mois", price: "30", currency: "EUR", description: "Abonnement Neo4K Pro - 6 Mois" },
+    "12mois": { name: "Plan 12 Mois", price: "45", currency: "EUR", description: "Abonnement Neo4K Pro - 12 Mois" },
 };
 
 const DATA_FILE = path.join(__dirname, 'orders.json');
@@ -39,20 +43,22 @@ function saveOrder(order) {
 
 async function sendAdminEmail(details) {
     const adminEmail = process.env.FROM_EMAIL || 'ihebaoufi10@gmail.com';
-    const source = details.ref ? (details.ref.startsWith('PAYID') ? 'PayPal' : 'Stripe') : 'N/A';
     const msg = {
         to: adminEmail,
         from: adminEmail,
-        subject: `\u{1F4B0} VENTE R\u00C9USSIE - Neo4k Pro (${details.plan})`,
+        subject: `💰 NOUVELLE COMMANDE - Neo4k Pro (${details.plan})`,
         html: `
-            <div style="font-family: sans-serif; padding: 20px; border: 1px solid #38bdf8; border-radius: 10px;">
-                <h2 style="color: #38bdf8;">Nouvelle commande confirm\u00E9e !</h2>
-                <p><strong>Plan choisi :</strong> ${details.plan}</p>
-                <p><strong>Email Client :</strong> ${details.email}</p>
-                <p><strong>WhatsApp Client :</strong> ${details.whatsapp || 'Non fourni'}</p>
-                <p><strong>R\u00E9f\u00E9rence ${source} :</strong> ${details.ref}</p>
-                <hr style="border: 0; border-top: 1px solid #eee;">
-                <p style="color: #666;">Veuillez livrer l'abonnement manuellement via WhatsApp ou Email.</p>
+            <div style="font-family: sans-serif; padding: 20px; border: 1px solid #FACC15; border-radius: 10px; background: #111;">
+                <h2 style="color: #FACC15;">🛒 Nouvelle commande à traiter !</h2>
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr><td style="padding: 8px; color: #aaa;">Plan :</td><td style="padding: 8px; font-weight: bold; color: #fff;">${details.plan}</td></tr>
+                    <tr><td style="padding: 8px; color: #aaa;">Montant :</td><td style="padding: 8px; font-weight: bold; color: #FACC15;">${details.amount || ''}</td></tr>
+                    <tr><td style="padding: 8px; color: #aaa;">Email Client :</td><td style="padding: 8px; color: #fff;">${details.email}</td></tr>
+                    <tr><td style="padding: 8px; color: #aaa;">WhatsApp Client :</td><td style="padding: 8px; color: #fff;">${details.whatsapp || 'Non fourni'}</td></tr>
+                    <tr><td style="padding: 8px; color: #aaa;">R\u00E9f\u00E9rence :</td><td style="padding: 8px; font-family: monospace; color: #fff;">${details.ref || '-'}</td></tr>
+                </table>
+                <hr style="border: 0; border-top: 1px solid #333; margin: 15px 0;">
+                <p style="color: #888;">Le client a \u00E9t\u00E9 redirig\u00E9 vers WhatsApp avec les instructions de paiement.<br>Veuillez v\u00E9rifier la r\u00E9ception du virement bancaire puis envoyer le code d'acc\u00E8s.</p>
             </div>
         `,
     };
@@ -64,137 +70,62 @@ async function sendAdminEmail(details) {
     }
 }
 
-// PayPal: Get Access Token
-async function getPayPalToken() {
-    const auth = Buffer.from(`${PAYPAL_CLIENT_ID}:${PAYPAL_SECRET}`).toString('base64');
-    const res = await axios.post(
-        `${PAYPAL_BASE_URL}/v1/oauth2/token`,
-        'grant_type=client_credentials',
-        {
-            headers: {
-                'Authorization': `Basic ${auth}`,
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-        }
-    );
-    return res.data.access_token;
-}
-
-// PayPal: Create Order
-app.post("/create-paypal-order", async (req, res) => {
-    const { planId, whatsapp, email } = req.body;
-    const plan = PLANS[planId];
-    if (!plan) return res.status(400).json({ error: "Plan invalide" });
-
-    try {
-        const token = await getPayPalToken();
-        const orderRes = await axios.post(
-            `${PAYPAL_BASE_URL}/v2/checkout/orders`,
-            {
-                intent: "CAPTURE",
-                purchase_units: [{
-                    description: plan.description,
-                    amount: {
-                        currency_code: plan.price.currency_code,
-                        value: plan.price.value,
-                    },
-                    custom_id: planId,
-                }],
-                application_context: {
-                    brand_name: "Neo4K Pro",
-                    user_action: "PAY_NOW",
-                    return_url: 'https://neo4k-site-v2.onrender.com/succes.html?plan=' + planId,
-                    cancel_url: 'https://neo4k-site-v2.onrender.com/annule.html',
-                },
-            },
-            {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                },
-            }
-        );
-
-        // Save pending order
-        const order = orderRes.data;
-        saveOrder({
-            type: "PAIEMENT",
-            plan: plan.name,
-            email: email || '',
-            whatsapp: whatsapp || '',
-            ref: order.id,
-            status: 'PENDING'
-        });
-
-        res.json({ id: order.id });
-    } catch (e) {
-        console.error("PayPal Create Order Error:", e.response?.data || e.message);
-        res.status(500).json({ error: "Erreur PayPal" });
-    }
-});
-
-// PayPal: Capture Order
-app.post("/capture-paypal-order/:orderID", async (req, res) => {
-    const { orderID } = req.params;
-
-    try {
-        const token = await getPayPalToken();
-        const captureRes = await axios.post(
-            `${PAYPAL_BASE_URL}/v2/checkout/orders/${orderID}/capture`,
-            {},
-            {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                },
-            }
-        );
-
-        const order = captureRes.data;
-        if (order.status === 'COMPLETED') {
-            const details = order.purchase_units[0];
-            const planId = details.custom_id || '1mois';
-            const plan = PLANS[planId] || PLANS['1mois'];
-            const payerEmail = order.payer?.email_address || '';
-
-            // Update saved order status
-            try {
-                const orders = JSON.parse(fs.readFileSync(DATA_FILE));
-                const idx = orders.findIndex(o => o.ref === orderID);
-                if (idx !== -1) {
-                    orders[idx].status = 'COMPLETED';
-                    orders[idx].email = payerEmail;
-                    fs.writeFileSync(DATA_FILE, JSON.stringify(orders, null, 2));
-                }
-            } catch (e) {
-                console.error("Error updating order:", e);
-            }
-
-            // Send admin email notification
-            await sendAdminEmail({
-                type: 'PAIEMENT',
-                plan: plan.name,
-                email: payerEmail,
-                whatsapp: '',
-                ref: orderID,
-            });
-        }
-
-        res.json(order);
-    } catch (e) {
-        console.error("PayPal Capture Error:", e.response?.data || e.message);
-        res.status(500).json({ error: "Erreur capture PayPal" });
-    }
-});
-
-// CORS Middleware
-app.use(cors());
-
-// Regular Body Parser
-app.use(express.json());
-
+// Health check
 app.get('/', (req, res) => {
     res.send('Neo4k Pro Backend is Live and Healthy.');
+});
+
+// Create Bank Transfer Order (replaces PayPal)
+app.post("/create-bank-order", async (req, res) => {
+    const { planId, email, whatsapp } = req.body;
+    const plan = PLANS[planId];
+    if (!plan) return res.status(400).json({ error: "Plan invalide" });
+    if (!email || !email.includes('@')) return res.status(400).json({ error: "Email invalide" });
+
+    // Generate reference
+    const ref = `NEO4K-${Date.now().toString(36).toUpperCase()}`;
+
+    // Save order
+    saveOrder({
+        type: "PAIEMENT",
+        plan: plan.name,
+        planId: planId,
+        amount: `${plan.price} ${plan.currency}`,
+        email: email,
+        whatsapp: whatsapp || '',
+        ref: ref,
+        status: 'PENDING',
+    });
+
+    // Send admin email
+    await sendAdminEmail({
+        plan: plan.name,
+        amount: `${plan.price} ${plan.currency}`,
+        email: email,
+        whatsapp: whatsapp || '',
+        ref: ref,
+    });
+
+    res.json({
+        success: true,
+        ref: ref,
+        iban: IBAN,
+        beneficiary: BENEFICIARY,
+        bank: BANK_NAME,
+        amount: `${plan.price}.${'00'}`,
+        currency: plan.currency,
+        description: `Neo4K Pro - ${plan.name}`,
+        whatsapp: WHATSAPP_NUMBER,
+    });
+});
+
+// Get IBAN info
+app.get("/iban-info", (req, res) => {
+    res.json({
+        iban: IBAN,
+        beneficiary: BENEFICIARY,
+        bank: BANK_NAME,
+    });
 });
 
 // Trial Request Logic
@@ -210,37 +141,39 @@ app.post("/request-trial", async (req, res) => {
 app.get("/admin-check-orders-secret-99", (req, res) => {
     let orders = [];
     try { orders = JSON.parse(fs.readFileSync(DATA_FILE)); } catch(e) {}
-    
+
     let html = `
     <html>
     <head>
         <title>Admin Dashboard - Neo4k Pro</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f172a; color: #e2e8f0; padding: 20px; }
-            h1 { color: #fbbf24; }
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #09090b; color: #e2e8f0; padding: 20px; }
+            h1 { color: #FACC15; }
             table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { border: 1px solid #334155; padding: 10px; text-align: left; }
-            th { background: #1e293b; color: #fbbf24; }
-            tr:nth-child(even) { background: #1e293b; }
+            th, td { border: 1px solid #3F3F46; padding: 10px; text-align: left; }
+            th { background: #18181b; color: #FACC15; }
+            tr:nth-child(even) { background: #18181b; }
             .badge { padding: 3px 8px; border-radius: 4px; font-size: 12px; }
             .badge-payment { background: #10b981; color: white; }
             .badge-trial { background: #3b82f6; color: white; }
             .badge-completed { background: #22c55e; color: white; }
             .badge-pending { background: #f59e0b; color: black; }
+            .whatsapp-link { color: #25D366; text-decoration: none; }
         </style>
     </head>
     <body>
-        <h1>\u{1F4CA} Admin Dashboard - Neo4k Pro</h1>
+        <h1>📊 Admin Dashboard - Neo4k Pro</h1>
         <p>Total commandes: ${orders.length}</p>
         <table>
-            <tr><th>Date</th><th>Type</th><th>Plan</th><th>Email</th><th>WhatsApp</th><th>Statut</th><th>R\u00E9f\u00E9rence</th></tr>
+            <tr><th>Date</th><th>Type</th><th>Plan</th><th>Montant</th><th>Email</th><th>WhatsApp</th><th>Statut</th><th>R\u00E9f\u00E9rence</th></tr>
             ${orders.map(o => `<tr>
                 <td>${o.date || '-'}</td>
                 <td><span class="badge ${o.type === 'PAIEMENT' ? 'badge-payment' : 'badge-trial'}">${o.type || '-'}</span></td>
                 <td>${o.plan || '-'}</td>
+                <td style="color: #FACC15;">${o.amount || '-'}</td>
                 <td>${o.email || '-'}</td>
-                <td>${o.whatsapp || '-'}</td>
+                <td><a class="whatsapp-link" href="https://wa.me/${(o.whatsapp || '').replace(/[^0-9]/g, '')}">${o.whatsapp || '-'}</a></td>
                 <td><span class="badge ${o.status === 'COMPLETED' ? 'badge-completed' : 'badge-pending'}">${o.status || '-'}</span></td>
                 <td style="font-size:11px">${o.ref || '-'}</td>
             </tr>`).join('')}
@@ -250,7 +183,7 @@ app.get("/admin-check-orders-secret-99", (req, res) => {
     res.send(html);
 });
 
-// Get plans info (used by frontend)
+// Get plans info
 app.get("/plans", (req, res) => {
     res.json(PLANS);
 });
@@ -259,13 +192,12 @@ const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 
-    // Self-ping every 10 minutes to prevent Render cold start
+    // Self-ping every 5 minutes to prevent Render cold start
     setInterval(() => {
-        const https = require('https');
         https.get('https://neo4k-final.onrender.com/', (res) => {
             console.log(`[Keep-Alive] Ping OK - Status: ${res.statusCode}`);
         }).on('error', (err) => {
             console.error('[Keep-Alive] Ping failed:', err.message);
         });
-    }, 10 * 60 * 1000); // Every 10 minutes
+    }, 5 * 60 * 1000); // Every 5 minutes
 });
